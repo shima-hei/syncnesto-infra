@@ -1,0 +1,13 @@
+.localstack/
+.env
+__pycache__/
+*.pyc
+.venv/
+.terraform/
+terraform/.terraform/
+*.tfstate
+*.tfstate.*
+*.tfplan
+.env.terraform.local
+*.tfvars
+*.tfvars.json
