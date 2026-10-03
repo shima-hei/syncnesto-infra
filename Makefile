@@ -1,6 +1,25 @@
 .PHONY: localstack-up localstack-down terraform-init terraform-plan terraform-apply terraform-destroy s3-ls sqs-list
 .PHONY: portfolio-init portfolio-validate portfolio-test portfolio-plan portfolio-apply
 .PHONY: database-init database-validate database-plan database-apply
+.PHONY: runtime-init runtime-validate runtime-test runtime-plan runtime-apply portfolio-migrate
+
+runtime-init:
+	python3 scripts/portfolio_terraform.py runtime init
+
+runtime-validate:
+	python3 scripts/portfolio_terraform.py runtime validate
+
+runtime-test:
+	python3 scripts/portfolio_terraform.py runtime test
+
+runtime-plan:
+	python3 scripts/portfolio_terraform.py runtime plan
+
+runtime-apply:
+	python3 scripts/portfolio_terraform.py runtime apply
+
+portfolio-migrate:
+	python3 scripts/migrate_portfolio.py
 
 database-init:
 	python3 scripts/portfolio_terraform.py database init

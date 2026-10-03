@@ -3,6 +3,17 @@ output "vercel_project_id" {
   value       = vercel_project.frontend.id
 }
 
+output "vercel_backend_project_id" {
+  description = "Vercel project ID for the separate FastAPI deployment."
+  value       = vercel_project.backend.id
+}
+
+output "backend_jwt_secret" {
+  description = "Production JWT signing key, kept separate from the BFF shared key."
+  value       = random_password.jwt_secret.result
+  sensitive   = true
+}
+
 output "neon_project_id" {
   description = "Neon project ID for account inspection and branch management."
   value       = neon_project.portfolio.id

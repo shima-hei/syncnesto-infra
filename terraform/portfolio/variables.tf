@@ -43,13 +43,13 @@ variable "backend_api_url" {
 }
 
 variable "vercel_function_region" {
-  description = "Region for the Next.js BFF. Singapore is close to the planned Render backend."
+  description = "Region for the Next.js BFF and FastAPI functions."
   type        = string
   default     = "sin1"
 }
 
 variable "neon_region_id" {
-  description = "Neon database region. Singapore is close to the planned Render backend. Changing it replaces the project."
+  description = "Neon database region. Singapore is close to the Vercel functions. Changing it replaces the project."
   type        = string
   default     = "aws-ap-southeast-1"
 }

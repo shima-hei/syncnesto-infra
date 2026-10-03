@@ -13,6 +13,11 @@ run "bootstrap_without_backend" {
     condition     = vercel_project.frontend.git_repository == null && !contains(keys(vercel_project_environment_variable.frontend), "API_BASE_URL")
     error_message = "Bootstrap must not connect GitHub or point a deployment at localhost."
   }
+
+  assert {
+    condition     = vercel_project.backend.framework == "fastapi" && vercel_project.backend.git_repository == null && vercel_project.backend.resource_config.fluid && vercel_project.backend.resource_config.function_default_timeout == 60
+    error_message = "FastAPI bootstrap must remain disconnected with Fluid Compute and a bounded timeout."
+  }
 }
 
 run "connect_ready_backend" {

@@ -1,12 +1,14 @@
 # ポートフォリオ公開環境
 
-このTerraformはVercelのNext.jsプロジェクトとNeonのPostgreSQLを新規作成する。LocalStack用の `terraform/` とはProvider・stateを分離している。FastAPIのホスティング、S3の公開用バケット、アプリのDB migration・seedは次の工程で用意する。
+このTerraformはVercelのNext.js・FastAPIプロジェクトとNeonのPostgreSQLを作成する。LocalStack用の `terraform/` とはProvider・stateを分離している。オブジェクトストレージはSupabase Storage Freeを使用する。バケット・S3キー・初期seed・実デプロイは準備完了後に行う。
 
 ## 作成内容
 
 - Vercel: Node.js 22のNext.jsプロジェクト。ProductionのBFF・Cookie設定。Previewの自動デプロイは無効。
+- Vercel: FastAPIプロジェクト。Singapore、Fluid Compute、実行上限60秒。ProductionのJWT署名キー・共有キー・Cookie設定。GitHub未接続。
 - Neon: PostgreSQL 17、`production` ブランチ、`syncnesto` DB、`syncnesto_owner` ロール、read-write compute。0.25 CU固定・5分の無操作で停止・履歴保持6時間。
 - `database/`: 管理ロールと別の `syncnesto_app`。テーブルのSELECT/INSERT/UPDATE/DELETEとシーケンス使用だけを許可し、DDL・ロール/DB作成を禁止する。今後のmigrationで管理ロールが作るテーブルにもdefault privilegesを適用する。
+- `runtime/`: 制限付きDB接続とSupabase S3の資格情報をバックエンド専用のSensitive環境変数として登録。秘密はephemeral入力・write-only値で渡す。
 - 接続先: 既定はSingapore（Neon `aws-ap-southeast-1`、Vercel `sin1`）。FastAPIも同地域で運用する想定。
 
 アカウントはVercel Hobby・Neon Freeを使う。Terraformはプランの変更や課金サービスの追加をしない。無料枠を超えたときの停止・制限は各サービスのFree/Hobbyプランに従う。Neon ProviderはNeon公式資料で紹介されているコミュニティ製 `kislerdm/neon` を利用する。
@@ -73,7 +75,15 @@ terraform -chdir=terraform/portfolio output -raw migration_database_url
 terraform -chdir=terraform/portfolio output -raw backend_bff_secret
 ```
 
-これらの `-raw` コマンドは秘密を表示するため、共有画面・ログでは実行せずホストの秘密設定へ直接渡す。FastAPIの `DATABASE_URL` は `database/` の制限付きpooled URI、Alembicの `DATABASE_URL` は管理用direct URIを使う。両方 `sslmode=verify-full` を指定する。PythonはOSのCAファイルを使い、必要なら `PGSSLROOTCERT` を設定する。migration・seedはバックエンドの既存手順で実行する。Neon DBの接続情報をVercelや `NEXT_PUBLIC_` 変数へ渡さない。
+これらの `-raw` コマンドは秘密を表示するため、共有画面・ログでは実行しない。通常はヘルパーがメモリ内で値を受け渡す。FastAPIの `DATABASE_URL` は `database/` の制限付きpooled URI、Alembicの `DATABASE_URL` は管理用direct URIを使う。両方 `sslmode=verify-full` を指定する。PythonはOSのCAファイル、存在しなければcertifiを使い、必要なら `PGSSLROOTCERT` を設定する。管理URIとDB資格情報をフロントエンドや `NEXT_PUBLIC_` 変数へ渡さない。
+
+アプリのmigrationは次のコマンドで管理URIを使って適用する。ローカルのデータやseedは移さない。
+
+```bash
+make portfolio-migrate
+```
+
+Supabaseの確認・S3キー発行・runtimeの適用手順は [ストレージ設定](../../docs/supabase-storage-setup.md) を参照する。
 
 FastAPIはHTTPSで公開し、少なくとも以下を設定する。その他の必須設定はバックエンドの `.env.example` とREADMEに従う。
 
@@ -89,9 +99,9 @@ ALLOW_AUTHORIZATION_HEADER=false
 FILE_UPLOAD_MODE=presigned
 ```
 
-本番用の `SECRET_KEY`、初期管理者設定、S3のバケット・接続設定も必要。公開S3互換ストレージにはフロントエンドのOriginを許可するCORSと `pending-uploads/` の清掃設定を用意する。詳細はバックエンドの `docs/frontend-file-upload.md` を参照。
+本番用の `SECRET_KEY` はTerraformで生成・登録する。初期管理者設定、非公開S3バケット・接続設定も必要。SupabaseはAWS向けのbucket CORS/lifecycle APIに対応しないため、実際のCORS応答と `pending-uploads/` の清掃運用を別途確認する。詳細はストレージ設定とバックエンドの `docs/frontend-file-upload.md` を参照。
 
-`SECRET_KEY` は32文字以上のランダム値を使う。本番では共有キー不足、安全でないCookie、Bearer認証、ワイルドカードHost、TLS検証のないDB URI、SQLログを起動時に拒否する。APIドキュメントは閉じ、ログイン10回/分・その他240回/分のIP制限をDB処理前に行う。無料の単一worker構成を想定したプロセス内制限であり、再起動・複数instanceをまたぐ制限ではない。
+`SECRET_KEY` は32文字以上のランダム値を使う。本番では共有キー不足、安全でないCookie、Bearer認証、ワイルドカードHost、TLS検証のないDB URI、SQLログを起動時に拒否する。APIドキュメントは閉じる。ログイン10回/分・その他240回/分のIP制限をPostgreSQLで共有し、再起動・複数instanceをまたいで維持する。全体6000回/分でカウンター増加も制限する。カウンター確認に短い独立DBトランザクションを使い、障害時は503を返す。
 
 Neon FreeはネットワークのIP Allowを利用できず、DBの接続先は公開される。TLS・強い認証情報・実行ロールの権限分離で保護する。認証情報の漏えいを防ぐ必要があり、接続試行や全ての攻撃を遮断する保証はない。確認範囲と公開前の残作業は [セキュリティ確認](../../docs/portfolio-security.md) を参照。
 
