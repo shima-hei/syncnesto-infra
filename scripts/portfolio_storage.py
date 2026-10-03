@@ -18,7 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 PROJECT = "pdyywnoregglnyjlapta"
 BUCKET = "syncnesto-portfolio"
 ENDPOINT = f"https://{PROJECT}.storage.supabase.co/storage/v1/s3"
-ORIGIN = "https://syncnesto-portfolio.vercel.app"
+ORIGIN = "https://syncnesto.vercel.app"
 MAX_BYTES = 20 * 1024 * 1024
 
 

@@ -14,7 +14,7 @@ from dotenv import dotenv_values
 from state_environment import state_environment
 
 ROOT = Path(__file__).resolve().parents[1]
-FRONTEND = "https://syncnesto-portfolio.vercel.app"
+FRONTEND = "https://syncnesto.vercel.app"
 BACKEND = "https://syncnesto-portfolio-api-shima-hei.vercel.app"
 
 

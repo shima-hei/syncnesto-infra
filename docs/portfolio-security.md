@@ -6,7 +6,7 @@
 
 - Vercel `syncnesto-portfolio` をHobbyで作成。Productionの `BFF_SHARED_SECRET` はSensitive変数として登録。DBの資格情報は渡していない。GitHubは未接続で、Previewの自動デプロイは無効。
 - Vercel `syncnesto-portfolio-api` をFastAPI用に作成。共有キー・JWT署名キー、安全な本番設定、制限付きDB接続とS3キーを登録してデプロイ済み。DB・S3の資格情報はバックエンドだけに登録。
-- フロントエンドは https://syncnesto-portfolio.vercel.app 、バックエンドは https://syncnesto-portfolio-api.vercel.app で公開。BFF接続には追加の安定エイリアス `syncnesto-portfolio-api-shima-hei.vercel.app` を使用し、明示Hostに登録。
+- フロントエンドは https://syncnesto.vercel.app 、バックエンドは https://syncnesto-portfolio-api.vercel.app で公開。フロントの公開ドメインはTerraformで管理し、本番デプロイへ自動割り当てする。BFF接続には追加の安定エイリアス `syncnesto-portfolio-api-shima-hei.vercel.app` を使用し、明示Hostに登録。
 - Supabase Storageは利用者のBilling画面でFree・Spend cap有効を確認。非公開バケット、20MiBのファイル上限、600秒の署名URLを設定。Security advisorsの指摘は0件。
 - Neon `syncnesto-portfolio` (`misty-band-66896279`) をFreeで作成。PostgreSQL 17、Singapore、0.25 CU固定。Freeの停止時間は明示変更できないため既定に従う。
 - `syncnesto_owner` はmigration専用。アプリはSQLで作成した `syncnesto_app` を使う。Neon APIで作るロールの管理権限をアプリへ与えない。

@@ -9,6 +9,12 @@ variable "project_name" {
   }
 }
 
+variable "frontend_domain" {
+  description = "Production domain assigned to the frontend independently of the project name."
+  type        = string
+  default     = "syncnesto.vercel.app"
+}
+
 variable "vercel_team_id" {
   description = "Vercel team ID confirmed through the connected account."
   type        = string

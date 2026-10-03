@@ -3,6 +3,11 @@ output "vercel_project_id" {
   value       = vercel_project.frontend.id
 }
 
+output "frontend_url" {
+  description = "Public production URL for the frontend."
+  value       = "https://${vercel_project_domain.frontend.domain}"
+}
+
 output "vercel_backend_project_id" {
   description = "Vercel project ID for the separate FastAPI deployment."
   value       = vercel_project.backend.id

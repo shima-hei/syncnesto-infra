@@ -2,7 +2,7 @@
 
 このTerraformはVercelのNext.js・FastAPIプロジェクトとNeonのPostgreSQLを作成する。LocalStack用の `terraform/` とはProvider・stateを分離している。オブジェクトストレージはSupabase Storage Freeを使用する。2026-10-04に全構成・非公開バケット・初期seedを適用し、実デプロイと公開URLでの動作確認を完了した。
 
-公開URL: [Syncnesto](https://syncnesto-portfolio.vercel.app)。初期管理者の資格情報はinfraルートのGit管理外 `.env.portfolio-admin.local` に保存する。
+公開URL: [Syncnesto](https://syncnesto.vercel.app)。`frontend_domain` で公開ドメインを管理し、Productionデプロイへ自動割り当てする。プロジェクト名の変更は不要。初期管理者の資格情報はinfraルートのGit管理外 `.env.portfolio-admin.local` に保存する。
 
 Terraform stateはNeonの専用DBへ移行済み。GitHub Actionsでのplan/apply、Secrets、ローカル実行の手順は [共有stateとActions](../../docs/github-actions.md) を参照する。Actionsの本番設定は `production.tfvars.example` を使う。
 

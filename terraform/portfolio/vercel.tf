@@ -31,6 +31,11 @@ resource "vercel_project" "frontend" {
   }
 }
 
+resource "vercel_project_domain" "frontend" {
+  project_id = vercel_project.frontend.id
+  domain     = var.frontend_domain
+}
+
 locals {
   frontend_environment = merge(
     {
