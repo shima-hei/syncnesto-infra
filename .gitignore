@@ -11,6 +11,7 @@ terraform/.terraform/
 .env.terraform.local
 .env.portfolio-admin.local
 .env.terraform-state.local
+state-backups/
 *.tfvars
 *.tfvars.json
 # Local .terraform directories

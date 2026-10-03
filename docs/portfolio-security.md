@@ -12,6 +12,7 @@
 - `syncnesto_owner` はmigration専用。アプリはSQLで作成した `syncnesto_app` を使う。Neon APIで作るロールの管理権限をアプリへ与えない。
 - アプリはCONNECT、public schemaのUSAGE、テーブルのSELECT/INSERT/UPDATE/DELETE、シーケンスのUSAGE/SELECTのみ。PUBLICのDB権限を剥奪し、管理ロールが将来作るテーブルにもdefault privilegesを設定。接続数20、statement timeout 30秒。ロールの管理権限・継承・replication・RLS bypassは無効。
 - 管理資格情報はVercelやブラウザへ渡さない。state・planはGit管理外。実行ヘルパーは新規秘密ファイルを所有者専用の権限で作る。stateには秘密が含まれるためバックアップも公開しない。
+- Terraform stateは専用Neon DBへ移行し、アプリロールからの接続を拒否。PostgreSQL backendのadvisory lockを使用。GitHubの本番Environmentはmain限定、PRの検証へ本番Secretsを渡さない。詳細は [Actions運用](github-actions.md)。
 
 ## 実装した防御
 

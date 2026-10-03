@@ -2,6 +2,8 @@
 
 LocalStackでの開発環境と、Vercel・Neonでのポートフォリオ公開環境を管理します。
 
+GitHub Actionsによる検証・本番applyと、Neon上の共有stateについては [運用手順](docs/github-actions.md) を参照してください。
+
 - `terraform/`: 既存のLocalStack用S3・SQS。
 - `terraform/portfolio/`: Vercelプロジェクト・Neon DB。別のProvider・stateで管理します。
 

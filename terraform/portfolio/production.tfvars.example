@@ -1,0 +1,8 @@
+project_name          = "syncnesto-portfolio"
+vercel_team_id        = "team_WyjvWWMPeMn7kxuteyNsC7EE"
+connect_github        = false
+backend_api_url       = "https://syncnesto-portfolio-api-shima-hei.vercel.app"
+backend_allowed_hosts = ["syncnesto-portfolio-api-shima-hei.vercel.app"]
+neon_region_id         = "aws-ap-southeast-1"
+vercel_function_region = "sin1"
+neon_organization_id   = "org-empty-dew-85265327"

@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from state_environment import state_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN_KEYS = ("VERCEL_API_TOKEN", "NEON_API_KEY")
 
@@ -25,7 +27,7 @@ def main() -> int:
         )
         return 2
 
-    env = os.environ.copy()
+    env = state_environment()
     credentials = ROOT / ".env.terraform.local"
     if credentials.exists():
         for number, line in enumerate(credentials.read_text().splitlines(), 1):

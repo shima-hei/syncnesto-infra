@@ -9,6 +9,8 @@ from uuid import uuid4
 import psycopg2
 from psycopg2 import sql
 
+from state_environment import state_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -19,6 +21,7 @@ def connection_output(directory: Path, output_name: str) -> dict:
         capture_output=True,
         text=True,
         check=True,
+        env=state_environment(),
     )
     return json.loads(result.stdout)[output_name]["value"]
 

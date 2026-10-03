@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
+from state_environment import state_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = "https://syncnesto-portfolio.vercel.app"
 BACKEND = "https://syncnesto-portfolio-api-shima-hei.vercel.app"
@@ -46,7 +48,8 @@ def main() -> int:
                 f"-chdir={ROOT / 'terraform' / 'portfolio'}",
                 "output",
                 "-json",
-            ]
+            ],
+            env=state_environment(),
         )
     )
     bff = {"X-Syncnesto-BFF-Key": outputs["backend_bff_secret"]["value"]}

@@ -1,0 +1,75 @@
+name: Terraform validation and production apply
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Production operation
+        type: choice
+        required: true
+        default: plan
+        options: [plan, apply]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: 0.10.11
+      - run: terraform -chdir=terraform/portfolio fmt -check -recursive
+      - name: Validate and test without cloud credentials
+        run: |
+          for stack in terraform/portfolio terraform/portfolio/database terraform/portfolio/runtime; do
+            terraform -chdir="$stack" init -backend=false -input=false -lockfile=readonly
+            terraform -chdir="$stack" validate
+            terraform -chdir="$stack" test
+          done
+      - run: uvx ruff@0.15.15 check scripts
+      - run: uvx ruff@0.15.15 format --check scripts
+      - run: python3 -m compileall -q scripts
+
+  production:
+    needs: checks
+    if: github.ref == 'refs/heads/main' && github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: terraform-production
+      cancel-in-progress: false
+    environment: production
+    env:
+      PG_CONN_STR: ${{ secrets.TF_STATE_DATABASE_URL }}
+      VERCEL_API_TOKEN: ${{ secrets.VERCEL_API_TOKEN }}
+      NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
+      SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
+      SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+      TF_IN_AUTOMATION: 'true'
+      TF_INPUT: 'false'
+      OPERATION: ${{ inputs.operation || 'plan' }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: 1.16.4
+          terraform_wrapper: false
+      - name: Use reviewed production settings
+        run: cp terraform/portfolio/production.tfvars.example terraform/portfolio/production.auto.tfvars
+      - name: Plan or apply existing production infrastructure
+        run: python3 scripts/run_portfolio_ci.py "$OPERATION"

@@ -4,6 +4,8 @@
 
 公開URL: [Syncnesto](https://syncnesto-portfolio.vercel.app)。初期管理者の資格情報はinfraルートのGit管理外 `.env.portfolio-admin.local` に保存する。
 
+Terraform stateはNeonの専用DBへ移行済み。GitHub Actionsでのplan/apply、Secrets、ローカル実行の手順は [共有stateとActions](../../docs/github-actions.md) を参照する。Actionsの本番設定は `production.tfvars.example` を使う。
+
 ## 作成内容
 
 - Vercel: Node.js 22のNext.jsプロジェクト。ProductionのBFF・Cookie設定。Previewの自動デプロイは無効。
@@ -117,7 +119,7 @@ Neon FreeはネットワークのIP Allowを利用できず、DBの接続先は�
 
 まず `connect_github = false` のまま `backend_api_url` にFastAPIの実際のHTTPS originを設定し、plan・applyする。VercelにProductionの `API_BASE_URL` が登録されたことを確認する。
 
-現在は `connect_github = false` を維持し、CLIで手動デプロイしている。フロントエンド・バックエンドそれぞれのルートで以下を実行する。設定を変更しても既存deploymentへ環境変数は反映されないため、再デプロイする。
+現在は `connect_github = false` を維持し、各アプリのGitHub Actionsでmain反映時にデプロイする。CLIで手動デプロイする場合は、フロントエンド・バックエンドそれぞれのルートで以下を実行する。設定を変更しても既存deploymentへ環境変数は反映されないため、再デプロイする。
 
 ```bash
 zsh -ic 'npx --yes vercel@62.2.0 deploy --prod --yes --token "$VERCEL_API_TOKEN"'

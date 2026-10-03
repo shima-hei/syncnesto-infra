@@ -7,6 +7,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+from state_environment import state_environment
+
 ROOT = Path(__file__).resolve().parents[1]
 BACKEND = ROOT.parent / "syncnesto-backend"
 
@@ -17,6 +19,7 @@ def main() -> int:
         ["terraform", f"-chdir={ROOT / 'terraform' / 'portfolio'}", "output", "-json"],
         capture_output=True,
         text=True,
+        env=state_environment(),
     )
     try:
         outputs = json.loads(result.stdout)
