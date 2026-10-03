@@ -1,6 +1,8 @@
 # ポートフォリオ公開環境
 
-このTerraformはVercelのNext.js・FastAPIプロジェクトとNeonのPostgreSQLを作成する。LocalStack用の `terraform/` とはProvider・stateを分離している。オブジェクトストレージはSupabase Storage Freeを使用する。バケット・S3キー・初期seed・実デプロイは準備完了後に行う。
+このTerraformはVercelのNext.js・FastAPIプロジェクトとNeonのPostgreSQLを作成する。LocalStack用の `terraform/` とはProvider・stateを分離している。オブジェクトストレージはSupabase Storage Freeを使用する。2026-10-04に全構成・非公開バケット・初期seedを適用し、実デプロイと公開URLでの動作確認を完了した。
+
+公開URL: [Syncnesto](https://syncnesto-portfolio.vercel.app)。初期管理者の資格情報はinfraルートのGit管理外 `.env.portfolio-admin.local` に保存する。
 
 ## 作成内容
 
@@ -99,17 +101,29 @@ ALLOW_AUTHORIZATION_HEADER=false
 FILE_UPLOAD_MODE=presigned
 ```
 
-本番用の `SECRET_KEY` はTerraformで生成・登録する。初期管理者設定、非公開S3バケット・接続設定も必要。SupabaseはAWS向けのbucket CORS/lifecycle APIに対応しないため、実際のCORS応答と `pending-uploads/` の清掃運用を別途確認する。詳細はストレージ設定とバックエンドの `docs/frontend-file-upload.md` を参照。
+本番用の `SECRET_KEY` はTerraformで生成・登録する。非公開S3バケット・接続設定も必要。初期seedは以下で行い、ランダム生成したパスワードをローカルだけに保存する。同じメール・ファイルでの再実行は既存資格情報を使う。
+
+```bash
+uv run --project ../syncnesto-backend python scripts/seed_portfolio.py --email '<管理者メール>'
+```
+
+SupabaseはAWS向けのbucket CORS/lifecycle APIに対応しないため、実際のCORS応答を検証し、`pending-uploads/` の手動清掃スクリプトを用意している。詳細はストレージ設定とバックエンドの `docs/frontend-file-upload.md` を参照。
 
 `SECRET_KEY` は32文字以上のランダム値を使う。本番では共有キー不足、安全でないCookie、Bearer認証、ワイルドカードHost、TLS検証のないDB URI、SQLログを起動時に拒否する。APIドキュメントは閉じる。ログイン10回/分・その他240回/分のIP制限をPostgreSQLで共有し、再起動・複数instanceをまたいで維持する。全体6000回/分でカウンター増加も制限する。カウンター確認に短い独立DBトランザクションを使い、障害時は503を返す。
 
-Neon FreeはネットワークのIP Allowを利用できず、DBの接続先は公開される。TLS・強い認証情報・実行ロールの権限分離で保護する。認証情報の漏えいを防ぐ必要があり、接続試行や全ての攻撃を遮断する保証はない。確認範囲と公開前の残作業は [セキュリティ確認](../../docs/portfolio-security.md) を参照。
+Neon FreeはネットワークのIP Allowを利用できず、DBの接続先は公開される。TLS・強い認証情報・実行ロールの権限分離で保護する。認証情報の漏えいを防ぐ必要があり、接続試行や全ての攻撃を遮断する保証はない。確認範囲と運用上の制限は [セキュリティ確認](../../docs/portfolio-security.md) を参照。
 
 ## 5. フロントエンドの接続
 
 まず `connect_github = false` のまま `backend_api_url` にFastAPIの実際のHTTPS originを設定し、plan・applyする。VercelにProductionの `API_BASE_URL` が登録されたことを確認する。
 
-その後 `connect_github = true` に変更し、再度plan・applyする。GitHubを接続する際はVercel GitHub Appに `shima-hei/SyncNesto-frontend` の参照権限が必要。`main` へのpushがProduction deploymentを作成する。設定を変更しても既存deploymentへ環境変数は反映されないため、再デプロイする。
+現在は `connect_github = false` を維持し、CLIで手動デプロイしている。フロントエンド・バックエンドそれぞれのルートで以下を実行する。設定を変更しても既存deploymentへ環境変数は反映されないため、再デプロイする。
+
+```bash
+zsh -ic 'npx --yes vercel@62.2.0 deploy --prod --yes --token "$VERCEL_API_TOKEN"'
+```
+
+自動デプロイを追加する場合は `connect_github = true` に変更し、plan・applyする。Vercel GitHub Appに `shima-hei/SyncNesto-frontend` の参照権限が必要。`main` へのpushがProduction deploymentを作成する。
 
 ポートフォリオのProductionはVercelログイン不要とし、アプリ内の既存認証を利用する。Previewは自動作成せず、ProductionのAPI・DBを共有しない。Previewを追加する際は別のNeonブランチとバックエンドを用意する。
 

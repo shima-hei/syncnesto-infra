@@ -48,6 +48,17 @@ variable "vercel_function_region" {
   default     = "sin1"
 }
 
+variable "backend_allowed_hosts" {
+  description = "Additional verified Vercel production aliases for the backend; no wildcards."
+  type        = list(string)
+  default     = []
+
+  validation {
+    condition     = alltrue([for host in var.backend_allowed_hosts : can(regex("^[A-Za-z0-9.-]+$", host)) && !strcontains(host, "*")])
+    error_message = "Set explicit hostnames without scheme, path, or wildcards."
+  }
+}
+
 variable "neon_region_id" {
   description = "Neon database region. Singapore is close to the Vercel functions. Changing it replaces the project."
   type        = string

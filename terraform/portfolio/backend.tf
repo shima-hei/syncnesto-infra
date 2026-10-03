@@ -30,7 +30,7 @@ locals {
     FILE_UPLOAD_MODE            = "presigned"
     SQL_ECHO                    = "false"
     LOG_FORMAT                  = "json"
-    ALLOWED_HOSTS               = "${var.project_name}-api.vercel.app"
+    ALLOWED_HOSTS               = join(",", concat(["${var.project_name}-api.vercel.app"], var.backend_allowed_hosts))
   }
 }
 

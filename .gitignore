@@ -9,5 +9,6 @@ terraform/.terraform/
 *.tfstate.*
 *.tfplan
 .env.terraform.local
+.env.portfolio-admin.local
 *.tfvars
 *.tfvars.json

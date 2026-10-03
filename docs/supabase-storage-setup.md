@@ -2,9 +2,10 @@
 
 確認済みのプロジェクトは `syncnesto`（`pdyywnoregglnyjlapta`）、地域はSingapore
 （`ap-southeast-1`）。管理用の `SUPABASE_ACCESS_TOKEN` と、S3用のアクセスキーは別の資格情報です。
-現在の管理トークンはプロジェクトを参照できますが、組織情報は403となるためFreeプランは未確認です。
+2026-10-04に利用者のBilling画面でFreeプラン・Spend cap有効・支払い方法未登録を確認しました。
+管理APIの組織情報は403ですが、S3用キーの設定・実通信は確認済みです。
 
-## Dashboardで行うこと
+## キーの発行・更新手順
 
 1. [組織のBilling画面](https://supabase.com/dashboard/org/yxsnqlgubcohdavdcpry/billing) を開き、現在のプランが **Free** であることを確認します。プラン変更は不要です。
 2. [このプロジェクトのS3設定](https://supabase.com/dashboard/project/pdyywnoregglnyjlapta/storage/s3) を開きます。
@@ -18,9 +19,9 @@ export SUPABASE_S3_SECRET_ACCESS_KEY='Secret Access Keyの値'
 ```
 
 値をチャット、リポジトリ、フロントエンドの環境変数へ貼らないでください。
-設定後は「Freeを確認し、S3キーを設定した」と伝えれば次の工程を進められます。
+現在のキーは設定済みです。再発行時はruntime構成を再適用し、バックエンドを再デプロイしてから旧キーを失効させます。
 
-## 次に適用する設定
+## 適用済みの設定
 
 `terraform/portfolio/runtime/` はVercelバックエンドのProductionに以下を登録します。
 
@@ -43,13 +44,27 @@ zsh -ic 'make runtime-apply'
 
 ## ストレージの準備と検証
 
-S3キー設定後に非公開バケット `syncnesto-portfolio` とデフォルト画像を用意します。
-現在のバケット一覧は空で、バケット作成・実アップロードの検証はまだ行っていません。
-署名付きPUT/GET、匿名取得の拒否、ブラウザのCORS preflight、アプリのアップロード完了処理を実環境で確認してから公開します。
+非公開バケット `syncnesto-portfolio` を作成し、サイズ上限20MiBと `default-avatar.png` を設定しました。
+署名付きPUT/GET、匿名・不正署名による取得の拒否、ブラウザのCORS preflight、アプリのアップロード完了処理を実環境で確認済みです。
+runtime state・保存したplanにS3キーが含まれないことも検証しました。
+
+以下はinfraルートから実行します。`prepare` は既存バケットの非公開設定・サイズ上限とデフォルト画像を更新するため、初期構築・復旧時に使用します。
+
+```bash
+zsh -ic 'uv run --project ../syncnesto-backend python scripts/portfolio_storage.py prepare'
+zsh -ic 'uv run --project ../syncnesto-backend python scripts/portfolio_storage.py verify'
+```
 
 SupabaseのS3 APIは `PutBucketCors`・`PutBucketLifecycleConfiguration` に対応していません。
 AWS向けのCORS/lifecycle設定をそのまま適用せず、プラットフォームのCORS応答を検証し、
-`pending-uploads/` の1日以上古いファイルをS3 APIで清掃する運用を別途用意します。
+`pending-uploads/` の1日以上古いファイルをS3 APIで清掃します。自動実行は設定していません。
+まず対象件数を確認し、必要時に `--execute` を指定します。検証後の対象件数は0件でした。
+
+```bash
+zsh -ic 'uv run --project ../syncnesto-backend python scripts/portfolio_storage.py cleanup-pending'
+zsh -ic 'uv run --project ../syncnesto-backend python scripts/portfolio_storage.py cleanup-pending --execute'
+```
+
 RLSを迂回するS3キーは全バケットにアクセスできるため、このプロジェクトはデモ専用で使います。
 ブラウザへ渡すのは権限検証後の短期署名付きURLだけです。
 

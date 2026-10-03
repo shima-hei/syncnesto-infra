@@ -1,11 +1,13 @@
-# ポートフォリオ公開前のセキュリティ確認
+# ポートフォリオ公開環境のセキュリティ確認
 
 確認日: 2026-10-04。対象はVercel/Neon Terraform、Next.jsのBFF・Server Guard、FastAPIの公開境界・DB接続。リポジトリ全体の侵入テストを完了したという意味ではない。
 
 ## 適用済みのクラウド設定
 
 - Vercel `syncnesto-portfolio` をHobbyで作成。Productionの `BFF_SHARED_SECRET` はSensitive変数として登録。DBの資格情報は渡していない。GitHubは未接続で、Previewの自動デプロイは無効。
-- Vercel `syncnesto-portfolio-api` をFastAPI用に作成。共有キー・JWT署名キーと安全な本番設定を登録。まだruntimeのDB・S3接続情報は登録せず、アプリはデプロイしていない。
+- Vercel `syncnesto-portfolio-api` をFastAPI用に作成。共有キー・JWT署名キー、安全な本番設定、制限付きDB接続とS3キーを登録してデプロイ済み。DB・S3の資格情報はバックエンドだけに登録。
+- フロントエンドは https://syncnesto-portfolio.vercel.app 、バックエンドは https://syncnesto-portfolio-api.vercel.app で公開。BFF接続には追加の安定エイリアス `syncnesto-portfolio-api-shima-hei.vercel.app` を使用し、明示Hostに登録。
+- Supabase Storageは利用者のBilling画面でFree・Spend cap有効を確認。非公開バケット、20MiBのファイル上限、600秒の署名URLを設定。Security advisorsの指摘は0件。
 - Neon `syncnesto-portfolio` (`misty-band-66896279`) をFreeで作成。PostgreSQL 17、Singapore、0.25 CU固定。Freeの停止時間は明示変更できないため既定に従う。
 - `syncnesto_owner` はmigration専用。アプリはSQLで作成した `syncnesto_app` を使う。Neon APIで作るロールの管理権限をアプリへ与えない。
 - アプリはCONNECT、public schemaのUSAGE、テーブルのSELECT/INSERT/UPDATE/DELETE、シーケンスのUSAGE/SELECTのみ。PUBLICのDB権限を剥奪し、管理ロールが将来作るテーブルにもdefault privilegesを設定。接続数20、statement timeout 30秒。ロールの管理権限・継承・replication・RLS bypassは無効。
@@ -21,7 +23,7 @@
 | ブラウザによる内部キー/IP偽装 | BFFで内部ヘッダーを上書きし、Vercel管理のIPだけ採用 | BFFヘッダー偽装・秘密未設定・応答漏えい防止テスト |
 | 本番設定漏れ | Secure Cookie・Cookie-only認証・強い署名キー・明示Host・DB証明書検証・SQLログ無効を起動条件にする | 危険な設定の起動拒否テスト |
 | 公開APIドキュメント・開発用CORS | productionのSwagger/ReDoc/OpenAPIと開発CORSを無効化 | 本番設定のルート404・Host制限のテスト |
-| ブラウザの埋め込み・MIME判定など | DENY、nosniff、Referrer/Permissions Policy、frame-ancestors/base-uri/object-src制限 | ローカルの本番HTTP応答で確認 |
+| ブラウザの埋め込み・MIME判定など | DENY、nosniff、Referrer/Permissions Policy、frame-ancestors/base-uri/object-src制限 | 本番HTTP応答で確認 |
 
 既存のHttpOnly Cookie、CSRF、アカウント単位のログイン失敗ロック、セッション、permission/RBACチェックは維持している。CSPは埋め込み等の基本制限であり、全スクリプトをnonceで制限する完全なXSS対策ではない。
 
@@ -36,14 +38,24 @@
 - 不正パスワード、SSL無効、CAファイル不足の接続は、それぞれ該当する理由で拒否。
 - 検証用テーブル・シーケンス等を削除。Terraformの両stateは適用後のplanで差分なし。
 
-バックエンド: ruff・pyright成功、pytest 445 passed / 5 skipped / 3 xfailed。フロント: format・typecheck・lint・build成功。Terraform: project・database・runtime構成のvalidate・mockテスト成功。runtimeは秘密設定待ちで未適用。skip/xfailは既存テストの条件による。
+バックエンド: ruff・pyright成功、pytest 445 passed / 5 skipped / 3 xfailed。フロント: format・typecheck・lint・build成功、Nodeテスト27件成功。Terraform: project・database・runtime構成のvalidate・mockテスト成功、全構成適用済み。skip/xfailは既存テストの条件による。
 
-## 公開前に残る作業と制限
+## 公開URLでの実通信と依存関係
 
-- FastAPIのVercelプロジェクトは作成済み。Supabase `syncnesto` プロジェクトを確認したが、組織のFreeプラン確認とS3キーの発行は未完了。制限付きDATABASE_URLとS3資格情報をruntime構成から登録する。
-- 管理URIでアプリの全migration（共有カウンターを含む）を適用済み。初期seedは未実行で、ローカルのデータを移していない。管理資格情報はruntimeに渡さない。
-- Supabaseにprivate bucket・署名付きアップロード・未完了オブジェクトの清掃を用意する。S3 bucket CORS/lifecycle APIは非対応のため、実際のプラットフォームCORS応答と別の清掃運用を検証する。
-- Backend URLをVercelへ登録し、変更を反映したコードでデプロイした後に、実URLでログイン・Cookie属性・権限・CSRF・429・直接API拒否を再確認する。現在は公開されたWebアプリの実URLを検証していない。
+- 管理URIで全migrationとRBAC・初期管理者seedを適用。ローカルDBのデータは移していない。初期パスワードはGit管理外の `.env.portfolio-admin.local` に所有者専用の権限で保存し、Vercelには登録していない。
+- `scripts/verify_portfolio_web.py` でログイン、Secure/HttpOnly Cookie、BFFの内部ヘッダー上書き、CSRFなしの更新拒否、画像の署名付きアップロード・完了・取得、画像の復元、ログアウト後の401、ログイン制限429/Retry-Afterを確認。
+- 直接APIは共有キーなしで403、正しい共有キーでもSwagger/ReDoc/OpenAPIは404。S3の匿名・不正署名による取得も拒否。
+- 公開前の監査に基づきNext.jsを16.3.8、Mermaidを11.16.1、FastAPIを0.142.2、Starletteを1.7.0、PyJWTを2.15.1などへ更新。2026-10-04時点の本番依存は `npm audit --omit=dev` と `pip-audit` の既知脆弱性0件。開発用CLI・コード生成ツールを含むnpm全体には35件の指摘が残り、本番依存の結果とは区別する。
+
+```bash
+uv run --project ../syncnesto-backend python scripts/verify_portfolio_web.py
+```
+
+検証は初期管理者の画像を一時変更してデフォルトへ戻す。既に独自アバターを設定した場合は実行を拒否する。レート制限検証で使う専用IPは同じ1分内に再実行しない。
+
+## 運用上の制限
+
+- S3 bucket CORS/lifecycle APIは非対応。プラットフォームのCORS応答を実通信で確認し、1日以上古い `pending-uploads/` の手動清掃スクリプトを用意。自動清掃は未設定。詳細は [ストレージ設定](supabase-storage-setup.md)。
 - Neon FreeではIP Allowが使えず、DBへの接続試行そのものは遮断できない。TLS・認証・権限で守る。資格情報が漏えいした場合は読み書きの被害を防げないため、ロールのパスワードを更新する。
 - IP制限はPostgreSQLで共有し、HMAC化したIPを保存する。同一プロセス内の事前制限も併用する。DDoS・分散攻撃・無料枠の消費を完全に防ぐものではない。Vercelには標準のDDoS保護があるが、カスタムWAFルールは作成していない。
 
