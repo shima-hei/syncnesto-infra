@@ -7,14 +7,14 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
-from pathlib import Path
 from uuid import uuid4
 
 import boto3
 from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
-ROOT = Path(__file__).resolve().parents[1]
+from .environment import ROOT
+
 PROJECT = "pdyywnoregglnyjlapta"
 BUCKET = "syncnesto-portfolio"
 ENDPOINT = f"https://{PROJECT}.storage.supabase.co/storage/v1/s3"

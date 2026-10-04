@@ -20,6 +20,11 @@ resource "vercel_project" "backend" {
   }
 }
 
+resource "vercel_project_domain" "backend" {
+  project_id = vercel_project.backend.id
+  domain     = var.backend_domain
+}
+
 locals {
   backend_environment = {
     APP_ENV                     = "production"
@@ -30,7 +35,7 @@ locals {
     FILE_UPLOAD_MODE            = "presigned"
     SQL_ECHO                    = "false"
     LOG_FORMAT                  = "json"
-    ALLOWED_HOSTS               = join(",", concat(["${var.project_name}-api.vercel.app"], var.backend_allowed_hosts))
+    ALLOWED_HOSTS               = join(",", distinct(concat([var.backend_domain], var.backend_allowed_hosts)))
   }
 }
 

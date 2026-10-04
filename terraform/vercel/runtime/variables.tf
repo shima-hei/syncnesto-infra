@@ -4,7 +4,7 @@ variable "vercel_team_id" {
 }
 
 variable "backend_project_id" {
-  description = "Injected from the portfolio stack by the execution helper."
+  description = "Injected from the Vercel stack by the execution helper."
   type        = string
 }
 

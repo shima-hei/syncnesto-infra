@@ -7,21 +7,18 @@ import shutil
 import subprocess
 import sys
 from datetime import UTC, datetime
-from pathlib import Path
 from urllib.parse import quote
 
 import psycopg2
 from psycopg2 import sql
 
-from state_environment import state_environment
+from .environment import ROOT, STACKS, VERCEL, state_environment
 
-ROOT = Path(__file__).resolve().parents[1]
-PORTFOLIO = ROOT / "terraform/portfolio"
 ROLE = "syncnesto_tfstate"
 DATABASE = "syncnesto_terraform"
 SCHEMAS = {
-    "": "portfolio_state",
-    "database": "database_state",
+    "vercel": "portfolio_state",
+    "neon": "database_state",
     "runtime": "runtime_state",
 }
 
@@ -30,11 +27,11 @@ def main() -> int:
     """専用DB・ロールの作成と、既存3構成の移行を行う。"""
     os.umask(0o077)
     env = state_environment()
-    local_state = PORTFOLIO / "terraform.tfstate"
-    metadata = json.loads((PORTFOLIO / ".terraform/terraform.tfstate").read_text())
+    local_state = VERCEL / "terraform.tfstate"
+    metadata = json.loads((VERCEL / ".terraform/terraform.tfstate").read_text())
     if metadata.get("backend", {}).get("type") == "pg":
         result = subprocess.run(
-            ["terraform", f"-chdir={PORTFOLIO}", "state", "pull"],
+            ["terraform", f"-chdir={VERCEL}", "state", "pull"],
             env=env,
             capture_output=True,
             text=True,
@@ -124,7 +121,7 @@ def main() -> int:
     backup = ROOT / "state-backups" / datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     backup.mkdir(parents=True, mode=0o700)
     for stack in SCHEMAS:
-        directory = PORTFOLIO / stack
+        directory = STACKS[stack]
         metadata_file = directory / ".terraform/terraform.tfstate"
         metadata = (
             json.loads(metadata_file.read_text()) if metadata_file.exists() else {}
@@ -140,8 +137,8 @@ def main() -> int:
             state = json.loads(result.stdout)
             if not state.get("resources"):
                 raise RuntimeError("Existing remote state is empty; refusing migration")
-            (backup / f"{stack or 'portfolio'}.tfstate").write_text(result.stdout)
-            print(f"PASS: {stack or 'portfolio'} already uses nonempty shared state")
+            (backup / f"{stack}.tfstate").write_text(result.stdout)
+            print(f"PASS: {stack} already uses nonempty shared state")
             continue
         local = directory / "terraform.tfstate"
         if not local.exists():
@@ -149,7 +146,7 @@ def main() -> int:
                 "Expected existing local state; refusing fresh bootstrap"
             )
         source = json.loads(local.read_text())
-        shutil.copy2(local, backup / f"{stack or 'portfolio'}.tfstate")
+        shutil.copy2(local, backup / f"{stack}.tfstate")
         result = subprocess.run(
             [
                 "terraform",
@@ -165,7 +162,7 @@ def main() -> int:
             text=True,
         )
         if result.returncode:
-            raise RuntimeError(f"State migration failed for {stack or 'portfolio'}")
+            raise RuntimeError(f"State migration failed for {stack}")
         migrated = subprocess.run(
             ["terraform", f"-chdir={directory}", "state", "pull"],
             env=env,
@@ -179,7 +176,7 @@ def main() -> int:
             "outputs"
         ) != target.get("outputs"):
             raise RuntimeError("Migrated state differs from the backup")
-        print(f"PASS: {stack or 'portfolio'} state migrated without resource changes")
+        print(f"PASS: {stack} state migrated without resource changes")
     print("Shared state prepared. Local backups and credentials are Git-ignored.")
     return 0
 

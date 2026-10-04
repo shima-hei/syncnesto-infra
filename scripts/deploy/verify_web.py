@@ -1,21 +1,18 @@
 """公開URLの接続境界・Cookie・CSRF・署名付きアップロードを検証する。"""
 
+import argparse
 import http.cookiejar
 import json
-import subprocess
 import sys
 import urllib.error
 import urllib.request
-from pathlib import Path
 from urllib.parse import urlsplit
 
 from dotenv import dotenv_values
 
-from state_environment import state_environment
+from .environment import BACKEND_ORIGIN, ROOT, terraform_outputs
 
-ROOT = Path(__file__).resolve().parents[1]
-FRONTEND = "https://syncnesto.vercel.app"
-BACKEND = "https://syncnesto-portfolio-api-shima-hei.vercel.app"
+BACKEND = BACKEND_ORIGIN
 
 
 def fetch(opener, url, *, method="GET", data=None, headers=None):
@@ -41,18 +38,16 @@ def expect(status: int, expected: int, label: str) -> None:
 
 def main() -> int:
     """初期管理者のアバターを検証後にデフォルトへ戻し、ログアウトする。"""
-    outputs = json.loads(
-        subprocess.check_output(
-            [
-                "terraform",
-                f"-chdir={ROOT / 'terraform' / 'portfolio'}",
-                "output",
-                "-json",
-            ],
-            env=state_environment(),
-        )
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--skip-upload",
+        action="store_true",
+        help="アバターを変更せず認証・接続境界を検証",
     )
-    bff = {"X-Syncnesto-BFF-Key": outputs["backend_bff_secret"]["value"]}
+    args = parser.parse_args()
+    outputs = terraform_outputs()
+    frontend = outputs["frontend_url"]
+    bff = {"X-Syncnesto-BFF-Key": outputs["backend_bff_secret"]}
     plain = urllib.request.build_opener()
     expect(fetch(plain, BACKEND + "/")[0], 200, "backend health")
     expect(fetch(plain, BACKEND + "/auth/me")[0], 403, "direct API denial")
@@ -62,17 +57,17 @@ def main() -> int:
 
     cookies = http.cookiejar.CookieJar()
     browser = urllib.request.build_opener(urllib.request.HTTPCookieProcessor(cookies))
-    expect(fetch(browser, FRONTEND + "/login")[0], 200, "frontend login page")
+    expect(fetch(browser, frontend + "/login")[0], 200, "frontend login page")
     status, _, _ = fetch(
         browser,
-        FRONTEND + "/api/auth/me",
+        frontend + "/api/auth/me",
         headers={"X-Syncnesto-BFF-Key": "browser-supplied-invalid-key"},
     )
     expect(status, 401, "unauthenticated BFF and internal-header overwrite")
     credentials = dotenv_values(ROOT / ".env.portfolio-admin.local")
     status, headers, body = fetch(
         browser,
-        FRONTEND + "/api/auth/login",
+        frontend + "/api/auth/login",
         method="POST",
         data={
             "email": credentials["INITIAL_ADMIN_EMAIL"],
@@ -92,20 +87,31 @@ def main() -> int:
         or "Secure" not in csrf_cookie
     ):
         raise RuntimeError("Production cookie attributes are incomplete")
-    status, _, body = fetch(browser, FRONTEND + "/api/auth/me")
+    status, _, body = fetch(browser, frontend + "/api/auth/me")
     expect(status, 200, "authenticated profile")
     if json.loads(body)["email"] != credentials["INITIAL_ADMIN_EMAIL"]:
         raise RuntimeError("Authenticated identity differs")
-    if not urlsplit(json.loads(body)["avatar_url"]).path.endswith(
-        "/default-avatar.png"
-    ):
-        raise RuntimeError(
-            "Use an account with the default avatar for this verification"
-        )
     csrf = next(cookie.value for cookie in cookies if cookie.name == "csrf_token")
-    update_headers = {"X-CSRF-Token": csrf, "Origin": FRONTEND}
+    update_headers = {"X-CSRF-Token": csrf, "Origin": frontend}
+    if not args.skip_upload and not urlsplit(
+        json.loads(body)["avatar_url"]
+    ).path.endswith("/default-avatar.png"):
+        expect(
+            fetch(
+                browser,
+                frontend + "/api/auth/logout",
+                method="POST",
+                headers=update_headers,
+                data={},
+            )[0],
+            204,
+            "logout before refusing avatar verification",
+        )
+        raise RuntimeError(
+            "Use the default avatar or --skip-upload for this verification"
+        )
     expect(
-        fetch(browser, FRONTEND + "/api/auth/logout", method="POST", data={})[0],
+        fetch(browser, frontend + "/api/auth/logout", method="POST", data={})[0],
         403,
         "missing CSRF denial",
     )
@@ -114,56 +120,60 @@ def main() -> int:
     )
 
     try:
-        content = (ROOT / "default-avatar.png").read_bytes()
-        status, _, body = fetch(
-            browser,
-            FRONTEND + "/api/auth/me/avatar/upload-plan",
-            method="POST",
-            headers=update_headers,
-            data={
-                "filename": "verification.png",
-                "content_type": "image/png",
-                "byte_size": len(content),
-            },
-        )
-        expect(status, 200, "upload plan")
-        plan = json.loads(body)
-        if plan["mode"] != "presigned":
-            raise RuntimeError("Deployment did not use presigned uploads")
-        request = urllib.request.Request(
-            plan["url"], data=content, method="PUT", headers=plan["headers"]
-        )
-        with plain.open(request, timeout=30) as response:
-            expect(response.status, 200, "direct storage upload")
-        status, _, body = fetch(
-            browser,
-            FRONTEND + "/api/auth/me/avatar/upload-complete",
-            method="POST",
-            headers=update_headers,
-            data={"upload_token": plan["upload_token"]},
-        )
-        expect(status, 200, "upload completion")
-        with plain.open(json.loads(body)["avatar_url"], timeout=30) as response:
-            if response.read() != content:
-                raise RuntimeError("Completed avatar differs from uploaded bytes")
-        print(
-            "PASS: authenticated plan, signed S3 PUT, completion, private image download"
-        )
-    finally:
-        expect(
-            fetch(
+        if args.skip_upload:
+            print("SKIP: avatar upload verification (--skip-upload)")
+        else:
+            content = (ROOT / "default-avatar.png").read_bytes()
+            status, _, body = fetch(
                 browser,
-                FRONTEND + "/api/auth/me/avatar",
-                method="DELETE",
+                frontend + "/api/auth/me/avatar/upload-plan",
+                method="POST",
                 headers=update_headers,
-            )[0],
-            200,
-            "restore default avatar",
-        )
+                data={
+                    "filename": "verification.png",
+                    "content_type": "image/png",
+                    "byte_size": len(content),
+                },
+            )
+            expect(status, 200, "upload plan")
+            plan = json.loads(body)
+            if plan["mode"] != "presigned":
+                raise RuntimeError("Deployment did not use presigned uploads")
+            request = urllib.request.Request(
+                plan["url"], data=content, method="PUT", headers=plan["headers"]
+            )
+            with plain.open(request, timeout=30) as response:
+                expect(response.status, 200, "direct storage upload")
+            status, _, body = fetch(
+                browser,
+                frontend + "/api/auth/me/avatar/upload-complete",
+                method="POST",
+                headers=update_headers,
+                data={"upload_token": plan["upload_token"]},
+            )
+            expect(status, 200, "upload completion")
+            with plain.open(json.loads(body)["avatar_url"], timeout=30) as response:
+                if response.read() != content:
+                    raise RuntimeError("Completed avatar differs from uploaded bytes")
+            print(
+                "PASS: authenticated plan, signed S3 PUT, completion, private image download"
+            )
+    finally:
+        if not args.skip_upload:
+            expect(
+                fetch(
+                    browser,
+                    frontend + "/api/auth/me/avatar",
+                    method="DELETE",
+                    headers=update_headers,
+                )[0],
+                200,
+                "restore default avatar",
+            )
         expect(
             fetch(
                 browser,
-                FRONTEND + "/api/auth/logout",
+                frontend + "/api/auth/logout",
                 method="POST",
                 headers=update_headers,
                 data={},
@@ -171,7 +181,7 @@ def main() -> int:
             204,
             "logout",
         )
-    expect(fetch(browser, FRONTEND + "/api/auth/me")[0], 401, "logged out session")
+    expect(fetch(browser, frontend + "/api/auth/me")[0], 401, "logged out session")
 
     # 存在しない入力なのでアカウントの失敗回数を増やさない。
     budget_headers = {**bff, "X-Syncnesto-Client-IP": "203.0.113.99"}

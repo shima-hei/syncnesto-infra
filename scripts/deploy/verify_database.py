@@ -1,29 +1,12 @@
 """Terraformで作成したNeonのTLS・認証・最小権限を実通信で検証する。"""
 
-import json
 import ssl
-import subprocess
-from pathlib import Path
 from uuid import uuid4
 
 import psycopg2
 from psycopg2 import sql
 
-from state_environment import state_environment
-
-ROOT = Path(__file__).resolve().parents[1]
-
-
-def connection_output(directory: Path, output_name: str) -> dict:
-    """接続情報はプロセス内だけで読み、標準出力へ出さない。"""
-    result = subprocess.run(
-        ["terraform", f"-chdir={directory}", "output", "-json"],
-        capture_output=True,
-        text=True,
-        check=True,
-        env=state_environment(),
-    )
-    return json.loads(result.stdout)[output_name]["value"]
+from .environment import terraform_outputs
 
 
 def connect(connection: dict, **overrides):
@@ -45,9 +28,8 @@ def connect(connection: dict, **overrides):
 
 def main() -> None:
     """専用の検証テーブルだけを操作し、最後に削除する。"""
-    portfolio = ROOT / "terraform" / "portfolio"
-    owner = connection_output(portfolio, "database_admin_connection")
-    application = connection_output(portfolio / "database", "verification_connection")
+    owner = terraform_outputs()["database_admin_connection"]
+    application = terraform_outputs("neon")["verification_connection"]
     assert owner["host"] == application["host"]
     assert owner["database"] == application["database"]
     assert owner["username"] != application["username"]

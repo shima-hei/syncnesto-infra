@@ -1,26 +1,18 @@
 """共有stateのTLS・権限分離・Terraformのロック競合を実通信で確認する。"""
 
-import json
 import subprocess
 import sys
-from pathlib import Path
 from urllib.parse import urlsplit
 
 import psycopg2
 
-from state_environment import state_environment
-
-ROOT = Path(__file__).resolve().parents[1]
-PORTFOLIO = ROOT / "terraform/portfolio"
+from .environment import STACKS, state_environment, terraform_outputs
 
 
 def main() -> int:
     """stateを変更せず、接続拒否とネイティブロックを確認する。"""
     env = state_environment()
-    output = subprocess.check_output(
-        ["terraform", f"-chdir={PORTFOLIO / 'database'}", "output", "-json"], env=env
-    )
-    app = json.loads(output)["verification_connection"]["value"]
+    app = terraform_outputs("neon", env=env)["verification_connection"]
     state = psycopg2.connect(env["PG_CONN_STR"], sslrootcert=env["PGSSLROOTCERT"])
     state.autocommit = True
     try:
@@ -87,7 +79,9 @@ def main() -> int:
         result = subprocess.run(
             [
                 sys.executable,
-                str(ROOT / "scripts/portfolio_terraform.py"),
+                "-m",
+                "scripts.deploy",
+                "terraform",
                 "plan",
                 "-input=false",
                 "-lock-timeout=1s",
@@ -106,8 +100,8 @@ def main() -> int:
             "PASS: Terraform rejected the concurrent state lock; session close releases it"
         )
         password = urlsplit(env["PG_CONN_STR"]).password
-        for stack in ("", "database", "runtime"):
-            metadata = (PORTFOLIO / stack / ".terraform/terraform.tfstate").read_text()
+        for directory in STACKS.values():
+            metadata = (directory / ".terraform/terraform.tfstate").read_text()
             if password in metadata or env["PG_CONN_STR"] in metadata:
                 raise RuntimeError("State credential was persisted in backend metadata")
         print("PASS: state credentials absent from local backend metadata")

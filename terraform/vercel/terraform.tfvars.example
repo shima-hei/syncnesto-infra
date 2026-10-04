@@ -1,4 +1,4 @@
-project_name   = "syncnesto-portfolio"
+project_name   = "syncnesto"
 vercel_team_id = "team_WyjvWWMPeMn7kxuteyNsC7EE"
 
 # まずは空のVercelプロジェクトとNeon DBを作る。
@@ -7,7 +7,7 @@ backend_api_url = null
 backend_allowed_hosts = []
 
 # 後からFastAPIの公開先に合わせて設定する。
-# backend_api_url = "https://syncnesto-portfolio-api.vercel.app"
+# backend_api_url = "https://syncnesto-api.vercel.app"
 # URLを設定してapplyした後にconnect_github = trueへ変更する。
 
 neon_region_id         = "aws-ap-southeast-1"

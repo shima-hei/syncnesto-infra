@@ -4,20 +4,16 @@ import json
 import os
 import subprocess
 import sys
-from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 
-from state_environment import state_environment
-
-ROOT = Path(__file__).resolve().parents[1]
-PORTFOLIO = ROOT / "terraform/portfolio"
+from .environment import STACKS, terraform_environment
 
 
 def execute(args: list[str], *, env: dict[str, str]) -> str:
     """エラーにも資格情報が含まれる可能性があるため、生ログを公開しない。"""
     result = subprocess.run(args, env=env, capture_output=True, text=True)
     if result.returncode:
-        raise RuntimeError(f"Terraform {args[2]} failed; no raw logs were published")
+        raise RuntimeError("Terraform command failed; no raw logs were published")
     return result.stdout
 
 
@@ -32,7 +28,7 @@ def main() -> int:
         and os.getenv("GITHUB_REF") != "refs/heads/main"
     ):
         raise RuntimeError("Production Terraform is restricted to main")
-    env = state_environment()
+    env = terraform_environment()
     required = (
         "PG_CONN_STR",
         "VERCEL_API_TOKEN",
@@ -52,8 +48,7 @@ def main() -> int:
         or parse_qs(parsed.query).get("sslmode") != ["verify-full"]
     ):
         raise RuntimeError("Expected verified direct connection to the state database")
-    for stack in ("", "database", "runtime"):
-        directory = PORTFOLIO / stack
+    for stack, directory in STACKS.items():
         terraform = ["terraform", f"-chdir={directory}"]
         execute([*terraform, "init", "-input=false", "-lockfile=readonly"], env=env)
         state = json.loads(execute([*terraform, "state", "pull"], env=env))
@@ -62,7 +57,7 @@ def main() -> int:
                 "Shared state is empty; refusing a fresh production apply"
             )
         plan = directory / "ci.tfplan"
-        helper = [sys.executable, str(ROOT / "scripts/portfolio_terraform.py")]
+        helper = [sys.executable, "-m", "scripts.deploy", "terraform"]
         if stack:
             helper.append(stack)
         execute(
@@ -77,7 +72,7 @@ def main() -> int:
                 raise RuntimeError("Destructive plan refused; review manually")
             if actions != ["no-op"]:
                 changes.append(change["address"] + ": " + ",".join(actions))
-        print(f"{stack or 'portfolio'}: {len(changes)} resource changes")
+        print(f"{stack}: {len(changes)} resource changes")
         for change in changes:
             print("  " + change)
         if operation == "apply":
@@ -85,7 +80,7 @@ def main() -> int:
                 [*helper, "apply", "-input=false", "-lock-timeout=120s", str(plan)],
                 env=env,
             )
-            print(f"PASS: {stack or 'portfolio'} apply completed")
+            print(f"PASS: {stack} apply completed")
     print(
         "Production Terraform operation completed; state and plan were not uploaded as artifacts."
     )

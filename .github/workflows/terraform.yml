@@ -31,16 +31,9 @@ jobs:
       - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
         with:
           version: 0.10.11
-      - run: terraform -chdir=terraform/portfolio fmt -check -recursive
+      - run: uv sync --locked
       - name: Validate and test without cloud credentials
-        run: |
-          for stack in terraform/portfolio terraform/portfolio/database terraform/portfolio/runtime; do
-            terraform -chdir="$stack" init -backend=false -input=false -lockfile=readonly
-            terraform -chdir="$stack" validate
-            terraform -chdir="$stack" test
-          done
-      - run: uvx ruff@0.15.15 check scripts
-      - run: uvx ruff@0.15.15 format --check scripts
+        run: make check
       - run: python3 -m compileall -q scripts
 
   production:
@@ -70,6 +63,6 @@ jobs:
           terraform_version: 1.16.4
           terraform_wrapper: false
       - name: Use reviewed production settings
-        run: cp terraform/portfolio/production.tfvars.example terraform/portfolio/production.auto.tfvars
+        run: cp terraform/vercel/production.tfvars.example terraform/vercel/production.auto.tfvars
       - name: Plan or apply existing production infrastructure
-        run: python3 scripts/run_portfolio_ci.py "$OPERATION"
+        run: python3 -m scripts.deploy ci "$OPERATION"

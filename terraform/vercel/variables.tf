@@ -1,7 +1,7 @@
 variable "project_name" {
-  description = "Name of the portfolio projects on Vercel and Neon."
+  description = "Existing project name on Vercel and Neon."
   type        = string
-  default     = "syncnesto-portfolio"
+  default     = "syncnesto"
 
   validation {
     condition     = can(regex("^[a-z][a-z0-9-]{1,48}[a-z0-9]$", var.project_name))
@@ -13,6 +13,12 @@ variable "frontend_domain" {
   description = "Production domain assigned to the frontend independently of the project name."
   type        = string
   default     = "syncnesto.vercel.app"
+}
+
+variable "backend_domain" {
+  description = "Production domain assigned to the backend independently of the project name."
+  type        = string
+  default     = "syncnesto-api.vercel.app"
 }
 
 variable "vercel_team_id" {

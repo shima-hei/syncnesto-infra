@@ -15,7 +15,7 @@ resource "neon_project" "portfolio" {
   }
 
   primary_compute {
-    name                     = "portfolio"
+    name                     = "production"
     autoscaling_limit_min_cu = 0.25
     autoscaling_limit_max_cu = 0.25
   }
