@@ -1,0 +1,21 @@
+services:
+  localstack:
+    image: localstack/localstack-pro:2026.06.0
+    container_name: syncnesto-localstack
+    ports:
+      - "4566:4566"
+    environment:
+      - LOCALSTACK_AUTH_TOKEN=${LOCALSTACK_AUTH_TOKEN:?Set LOCALSTACK_AUTH_TOKEN in .env}
+      - SERVICES=s3,sqs
+      - AWS_DEFAULT_REGION=ap-northeast-1
+      - DEBUG=1
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    volumes:
+      - "./.localstack:/var/lib/localstack"
+      - "./localstack/init/ready.d:/etc/localstack/init/ready.d:ro"
+      - "./default-avatar.png:/opt/syncnesto/default-avatar.png:ro"
+      - "/var/run/docker.sock:/var/run/docker.sock"
