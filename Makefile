@@ -5,13 +5,14 @@ TF = terraform -chdir=terraform/localstack
 
 .PHONY: help check
 .PHONY: localstack-up localstack-down terraform-init terraform-validate terraform-plan terraform-apply terraform-destroy s3-ls sqs-list
+.PHONY: mailpit-up mailpit-stop
 .PHONY: vercel-init vercel-validate vercel-test vercel-plan vercel-apply db-migrate
 .PHONY: neon-init neon-validate neon-test neon-plan neon-apply
 .PHONY: runtime-init runtime-validate runtime-test runtime-plan runtime-apply
 .PHONY: deploy-plan deploy-apply verify-database verify-state verify-web storage-verify
 
 help:
-	@printf '%s\n' 'Local: localstack-up / localstack-down / terraform-{init,validate,plan,apply}' 'Vercel: vercel-{init,validate,test,plan,apply}' 'Neon: neon-{init,validate,test,plan,apply}' 'Runtime: runtime-{init,validate,test,plan,apply}' 'All production stacks: deploy-plan / deploy-apply' 'Verification: check / verify-database / verify-state / verify-web / storage-verify' 'Application migrations: db-migrate'
+	@printf '%s\n' 'Local: localstack-up / localstack-down / mailpit-up / mailpit-stop / terraform-{init,validate,plan,apply}' 'Vercel: vercel-{init,validate,test,plan,apply}' 'Neon: neon-{init,validate,test,plan,apply}' 'Runtime: runtime-{init,validate,test,plan,apply}' 'All production stacks: deploy-plan / deploy-apply' 'Verification: check / verify-database / verify-state / verify-web / storage-verify' 'Application migrations: db-migrate'
 
 # ローカル開発
 localstack-up:
@@ -19,6 +20,12 @@ localstack-up:
 
 localstack-down:
 	docker compose down
+
+mailpit-up:
+	docker compose up -d --no-deps mailpit
+
+mailpit-stop:
+	docker compose stop mailpit
 
 terraform-init terraform-validate terraform-plan terraform-apply terraform-destroy:
 	$(TF) $(patsubst terraform-%,%,$@)

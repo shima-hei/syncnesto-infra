@@ -82,6 +82,86 @@ AWS_S3_BUCKET_NAME=syncnesto-local-app-bucket
 
 `test` はLocalStack専用のダミー値です。本番のキーやDB接続を使わないでください。
 
+### ローカルの承認メール
+
+Mailpitにメールを受け取り、本人確認リンクをブラウザで操作します。Mailpitは外部のメールアドレスへ配送しません。
+以下はMailpitだけを起動するため、起動中のLocalStackや別ComposeのPostgreSQLを再起動しません。
+
+```bash
+make mailpit-up
+```
+
+受信画面は [http://localhost:8025](http://localhost:8025)。SMTPは `127.0.0.1:1025` です。
+両ポートはホストのloopbackだけに公開します。受信メールは専用の `mailpit_data` volumeに保持し、停止は `make mailpit-stop`。
+500通を超えると古いメールから削除します。確認リンクは本人確認用の秘密を含むため、受信画面を外部へ公開しないでください。
+
+ホスト上で動かすBackendのGit管理外 `.env` に次の設定を追加して再起動します。
+`FRONTEND_PUBLIC_URL` は実際に利用するFrontendのoriginに合わせてください。
+
+```env
+EMAIL_PROVIDER=smtp
+EMAIL_FROM=Syncnesto <noreply@syncnesto.local>
+FRONTEND_PUBLIC_URL=http://localhost:3000
+EMAIL_TIMEOUT_SECONDS=10
+SMTP_HOST=127.0.0.1
+SMTP_PORT=1025
+SMTP_USERNAME=
+SMTP_PASSWORD=
+SMTP_STARTTLS=false
+```
+
+Backendを同じComposeネットワーク内で起動する場合は `SMTP_HOST=mailpit` にします。
+この設定では `admin@example.com` 等の開発用メールもMailpitで受け取れます。
+`EMAIL_PROVIDER=disabled` が未設定時の既定で、送信できない場合は資格情報を変更しません。
+
+### ドメイン購入なしでGmailから実送信する
+
+指定された送信用アドレスは `syncnesto@gmail.com` です。無料Gmailアドレスを使うと、独自ドメインの購入なしで承認メールを送れます。
+このアカウントの準備・所有と実送信は別途確認します。
+送信用Googleアカウントの2段階認証を有効にし、[Syncnesto専用アプリパスワード](https://support.google.com/accounts/answer/185833?hl=ja) を作成してください。
+通常のGoogleログインパスワードは使いません。アプリパスワードを作れない保護設定・組織アカウントもあります。
+
+BackendのGit管理外 `.env` へ、Mailpit設定の代わりに以下を設定して再起動します。
+パスワードをチャットやGitへ貼らず、画面上の区切り空白を除いた16文字を設定します。
+
+```env
+EMAIL_PROVIDER=smtp
+EMAIL_FROM=Syncnesto <syncnesto@gmail.com>
+FRONTEND_PUBLIC_URL=http://localhost:3000
+SMTP_HOST=smtp.gmail.com
+SMTP_PORT=587
+SMTP_USERNAME=syncnesto@gmail.com
+SMTP_PASSWORD=<空白なし16文字の専用アプリパスワード>
+SMTP_STARTTLS=true
+```
+
+送信元は認証したGmailアドレスと同じにします。STARTTLSの証明書検証に失敗した場合は認証・送信しません。
+実送信テストには実際に受信できるアドレスを使用し、Mailpitで確認するときは前節の設定へ戻してください。
+Gmailには [送信上限](https://support.google.com/mail/answer/22839?hl=ja) があり、小規模運用を想定しています。
+Googleのログインパスワード変更時はアプリパスワードも失効するため、再発行・環境変数更新が必要です。
+
+本番は `FRONTEND_PUBLIC_URL` をHTTPSのFrontend originへ変更し、BackendだけにSMTP変数を登録します。
+本番SMTPは `smtp.gmail.com:587`、STARTTLS、認証、送信元一致を必須にしています。
+SMTPパスワードは既存runtimeと同様にTerraformのephemeral入力・write-only登録で管理し、Frontendへ渡しません。
+[Vercelでは587番のSMTP接続が許可されています](https://vercel.com/kb/guide/serverless-functions-and-smtp) が、Python Runtimeでの送信・背景処理・到達はpreview環境でも検証してください。
+2026-10-04にローカルBackendのGmail資格情報をGit管理外で設定し、TLS接続・SMTP認証・確認メール1通の送信・ユーザーによる受信確認を完了しました。本番メール環境変数の適用とVercelからの実送信は未実施です。
+Backendの確認フロー・SMTP/SES切り替え方針は [email-approval.md](../syncnesto-backend/docs/email-approval.md) を参照してください。
+
+### 将来のResendへの切り替え
+
+2026-10-04時点の [Resend Free](https://resend.com/pricing) は3,000通/月・100通/UTC日・認証済み3ドメインです。
+Resendは [Vercel Marketplace](https://resend.com/docs/guides/vercel-marketplace-integration) から利用できますが、この統合はVercelで購入した独自ドメインが前提です。
+独立したResendアカウントとAPIでは、別のレジストラで取得した所有ドメインも使えます。
+現在の `syncnesto.vercel.app` は送信ドメインとして使えません。
+
+独自ドメインを [認証](https://resend.com/docs/add-a-domain) した後、Backend専用に `EMAIL_PROVIDER=resend`、`EMAIL_FROM`、`RESEND_API_KEY` とHTTPSの `FRONTEND_PUBLIC_URL` を設定します。
+APIキーは `NEXT_PUBLIC_` に設定せず、Terraformの既存runtimeと同様にephemeral入力・write-only登録で管理してください。
+本番の送信設定・DNS・APIキー・Terraform/Actionsの切り替えは、ローカル確認後に行います。現構成は本番にメール関連変数を登録していません。
+
+独自ドメインがない段階では、`onboarding@resend.dev` から [Resend登録本人への試験送信](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain) に限られます。
+一般利用者への承認メールには独自ドメインが必要です。`admin@example.com` のような開発用アドレスをResendの実送信検証には使わないでください。
+将来SESへ移す場合は送信アダプターを追加し、本人確認・権限・監査は共用します。
+
 ## 公開環境の設定・環境変数
 
 Vercel Hobby、Neon Free、Supabase Storage Freeを使います。
@@ -168,6 +248,16 @@ uv run python -m scripts.deploy seed --email '<管理者メール>'
 管理用 `syncnesto_owner` のdirect接続を使います。ローカルDBのデータは移しません。
 seedはRBACと初期管理者を作り、ランダムなパスワードをローカルへ保存します。既存の資格情報を上書きしません。
 本番migrationはbackendのActionsにも組み込まれています。infraのapplyではmigration・seedを実行しません。
+
+マルチテナント移行後は、指定した既存IdentityだけをDefault Tenantの初期Ownerにします。既存の別Ownerがいる場合は処理を拒否します。
+
+```sh
+uv run python -m scripts.deploy tenant-owner --email '<指定Ownerメール>'
+# 初期パスワードも明示的に設定する場合だけ、0600のファイルを指定する
+uv run python -m scripts.deploy tenant-owner --email '<指定Ownerメール>' --password-file '<絶対パス>'
+```
+
+このコマンドはRBACとOwnerを初期化し、Project所属を保持します。パスワード指定時は対象本人の既存セッションを失効します。バックアップ・移行・対応Backend/Frontendの公開順序は [組織境界と移行手順](../syncnesto-backend/docs/multi-tenancy.md) を参照してください。
 
 ## Supabase Storage・キーの更新
 
