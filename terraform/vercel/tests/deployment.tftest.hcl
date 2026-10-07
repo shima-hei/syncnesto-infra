@@ -71,3 +71,26 @@ run "reject_wildcard_backend_host" {
 
   expect_failures = [var.backend_allowed_hosts]
 }
+run "reject_demo_with_shared_data" {
+  command = plan
+  variables {
+    app_env = "demo"
+  }
+  expect_failures = [vercel_project.backend]
+}
+
+run "explicit_isolated_demo" {
+  command = plan
+  variables {
+    app_env            = "demo"
+    demo_data_isolated = true
+  }
+  assert {
+    condition     = nonsensitive(vercel_project_environment_variable.backend_public["APP_ENV"].value) == "demo" && nonsensitive(vercel_project_environment_variable.frontend["APP_ENV"].value) == "demo"
+    error_message = "Demo behavior must agree on frontend and backend."
+  }
+  assert {
+    condition     = vercel_project_environment_variable.demo_cron_secret.sensitive && vercel_project_environment_variable.demo_cron_secret.key == "CRON_SECRET"
+    error_message = "Cleanup credentials must only be installed as a backend secret."
+  }
+}

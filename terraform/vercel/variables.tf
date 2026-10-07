@@ -82,3 +82,18 @@ variable "neon_organization_id" {
   type        = string
   default     = null
 }
+variable "app_env" {
+  description = "Application behavior on the Vercel production target; demo is opt-in."
+  type        = string
+  default     = "production"
+  validation {
+    condition     = contains(["production", "demo"], var.app_env)
+    error_message = "app_env must be production or demo."
+  }
+}
+
+variable "demo_data_isolated" {
+  description = "Confirm runtime DATABASE_URL and private storage bucket are dedicated to the demo."
+  type        = bool
+  default     = false
+}

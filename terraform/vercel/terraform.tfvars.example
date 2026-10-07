@@ -1,4 +1,7 @@
 project_name   = "syncnesto"
+app_env = "production"
+# デモ専用DB・privateバケットへの接続をruntimeで設定後にtrueにする。
+demo_data_isolated = false
 vercel_team_id = "team_WyjvWWMPeMn7kxuteyNsC7EE"
 
 # まずは空のVercelプロジェクトとNeon DBを作る。
