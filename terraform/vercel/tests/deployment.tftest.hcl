@@ -98,8 +98,8 @@ run "explicit_isolated_demo" {
     error_message = "Demo flags must agree while both apps keep production security."
   }
   assert {
-    condition     = nonsensitive(vercel_project_environment_variable.backend_public["EMAIL_PROVIDER"].value) == "disabled" && nonsensitive(vercel_project_environment_variable.backend_public["AUTH_COOKIE_SECURE"].value) == "true" && nonsensitive(vercel_project_environment_variable.backend_public["CSRF_COOKIE_SECURE"].value) == "true" && nonsensitive(vercel_project_environment_variable.backend_public["ALLOW_AUTHORIZATION_HEADER"].value) == "false"
-    error_message = "Demo must disable mail and keep Secure cookies and Cookie-only authentication."
+    condition     = !contains(keys(local.backend_environment), "EMAIL_PROVIDER") && nonsensitive(vercel_project_environment_variable.backend_public["AUTH_COOKIE_SECURE"].value) == "true" && nonsensitive(vercel_project_environment_variable.backend_public["CSRF_COOKIE_SECURE"].value) == "true" && nonsensitive(vercel_project_environment_variable.backend_public["ALLOW_AUTHORIZATION_HEADER"].value) == "false"
+    error_message = "Demo must preserve normal mail settings and keep Secure cookies and Cookie-only authentication."
   }
   assert {
     condition     = vercel_project_environment_variable.demo_cron_secret.sensitive && vercel_project_environment_variable.demo_cron_secret.key == "CRON_SECRET"
@@ -139,7 +139,7 @@ run "reject_cleanup_without_tenants" {
   expect_failures = [vercel_project.backend]
 }
 
-run "reject_cleanup_in_demo" {
+run "normal_cleanup_coexists_with_demo" {
   command = plan
   variables {
     demo_mode                       = true
@@ -147,7 +147,10 @@ run "reject_cleanup_in_demo" {
     deleted_data_cleanup_mode       = "execute"
     deleted_data_cleanup_tenant_ids = [1]
   }
-  expect_failures = [vercel_project.backend]
+  assert {
+    condition     = local.backend_environment.DELETED_DATA_CLEANUP_MODE == "execute" && local.backend_environment.DEMO_MODE == "true"
+    error_message = "Demo availability must not disable normal retention cleanup."
+  }
 }
 
 run "reject_invalid_cleanup_tenant_id" {

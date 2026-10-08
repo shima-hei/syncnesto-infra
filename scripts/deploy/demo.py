@@ -60,6 +60,21 @@ def demo_outputs(env: dict[str, str]) -> dict:
     return demo
 
 
+def restricted_runtime_uri(dedicated: dict, database: dict) -> str:
+    """専用stateでも通常hostやowner URIが混ざれば公開設定へ渡さない。"""
+    uri = database["backend_database_url"]
+    parsed = urlsplit(uri)
+    if (
+        parsed.hostname != dedicated["database_admin_connection"]["pooled_host"]
+        or parsed.username != "syncnesto_app"
+        or parsed.path != "/syncnesto"
+        or parsed.scheme != "postgresql"
+        or parsed.query != "sslmode=verify-full"
+    ):
+        raise RuntimeError("Expected the dedicated demo restricted pooler URI")
+    return uri
+
+
 def storage_environment(env: dict[str, str]) -> dict[str, str]:
     """デモ専用キーだけを補完し、通常キーの暗黙利用を防ぐ。"""
     result = env.copy()
@@ -142,11 +157,15 @@ def backend_environment(*, with_storage: bool = False) -> dict[str, str]:
         target = storage_target(env)
         env.update(
             {
-                "AWS_ACCESS_KEY_ID": env[STORAGE_KEYS[1]],
-                "AWS_SECRET_ACCESS_KEY": env[STORAGE_KEYS[2]],
-                "AWS_REGION": target.region,
-                "AWS_S3_BUCKET_NAME": target.bucket,
-                "AWS_S3_ENDPOINT_URL": target.endpoint,
+                # 回収だけを実行するprocess。通常接続を使った場合は必ず接続不能。
+                "DATABASE_URL": "postgresql://unused:unused@unused.invalid/unused?sslmode=verify-full",
+                "DEMO_DATABASE_URL": demo["migration_database_url"],
+                "DEMO_SECRET_KEY": demo["backend_jwt_secret"],
+                "DEMO_AWS_ACCESS_KEY_ID": env[STORAGE_KEYS[1]],
+                "DEMO_AWS_SECRET_ACCESS_KEY": env[STORAGE_KEYS[2]],
+                "DEMO_AWS_REGION": target.region,
+                "DEMO_AWS_S3_BUCKET_NAME": target.bucket,
+                "DEMO_AWS_S3_ENDPOINT_URL": target.endpoint,
                 "FILE_UPLOAD_MODE": "presigned",
             }
         )

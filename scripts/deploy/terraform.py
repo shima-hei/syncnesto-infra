@@ -78,6 +78,33 @@ def main() -> int:
                     "TF_VAR_storage_secret_key": env[required[1]],
                 }
             )
+            if env.get("TF_VAR_demo_runtime_enabled", "false").lower() == "true":
+                from .demo import (
+                    demo_outputs,
+                    restricted_runtime_uri,
+                    storage_environment,
+                )
+
+                dedicated = demo_outputs(env)
+                demo_database = terraform_outputs("demo-neon", env=env)
+                env = storage_environment(env)
+                env.update(
+                    {
+                        "TF_VAR_demo_database_url": restricted_runtime_uri(
+                            dedicated, demo_database
+                        ),
+                        "TF_VAR_demo_secret_key": dedicated["backend_jwt_secret"],
+                        "TF_VAR_demo_supabase_project_ref": env[
+                            "DEMO_SUPABASE_PROJECT_REF"
+                        ],
+                        "TF_VAR_demo_storage_access_key": env[
+                            "DEMO_SUPABASE_S3_ACCESS_KEY_ID"
+                        ],
+                        "TF_VAR_demo_storage_secret_key": env[
+                            "DEMO_SUPABASE_S3_SECRET_ACCESS_KEY"
+                        ],
+                    }
+                )
 
     return subprocess.call(["terraform", f"-chdir={ALL_STACKS[stack]}", *args], env=env)
 

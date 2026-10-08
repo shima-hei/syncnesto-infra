@@ -42,6 +42,24 @@ def dedicated_outputs():
 
 
 class DemoDatabaseTests(unittest.TestCase):
+    def test_runtime_refuses_owner_normal_host_and_unverified_tls(self):
+        uri = "postgresql://syncnesto_app:fixture@ep-demo-pooler.neon.tech/syncnesto?sslmode=verify-full"
+        self.assertEqual(
+            demo.restricted_runtime_uri(
+                dedicated_outputs(), {"backend_database_url": uri}
+            ),
+            uri,
+        )
+        for invalid in (
+            uri.replace("ep-demo", "ep-existing"),
+            uri.replace("syncnesto_app", "syncnesto_owner"),
+            uri.replace("verify-full", "require"),
+        ):
+            with self.assertRaises(RuntimeError):
+                demo.restricted_runtime_uri(
+                    dedicated_outputs(), {"backend_database_url": invalid}
+                )
+
     def test_rejects_existing_project_host_and_mismatched_uri(self):
         variants = []
         for change in ("project", "host", "pooler", "state-db", "uri"):

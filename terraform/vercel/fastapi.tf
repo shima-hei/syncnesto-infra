@@ -22,8 +22,8 @@ resource "vercel_project" "backend" {
       error_message = "Configure a dedicated demo database and private bucket before setting demo_data_isolated=true."
     }
     precondition {
-      condition     = var.deleted_data_cleanup_mode == "disabled" || (!var.demo_mode && length(var.deleted_data_cleanup_tenant_ids) > 0)
-      error_message = "Scheduled trash cleanup requires demo_mode=false and explicitly selected tenant IDs."
+      condition     = var.deleted_data_cleanup_mode == "disabled" || length(var.deleted_data_cleanup_tenant_ids) > 0
+      error_message = "Scheduled trash cleanup requires explicitly selected normal tenant IDs."
     }
   }
 }
@@ -51,7 +51,7 @@ locals {
     SQL_ECHO                            = "false"
     LOG_FORMAT                          = "json"
     ALLOWED_HOSTS                       = join(",", distinct(concat([var.backend_domain], var.backend_allowed_hosts)))
-  }, var.demo_mode ? { EMAIL_PROVIDER = "disabled" } : {})
+  })
 }
 
 resource "random_password" "demo_cron_secret" {

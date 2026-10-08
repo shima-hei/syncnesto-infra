@@ -310,15 +310,18 @@ Backendの開発用`.env`にSMTPやlocalhostの設定があっても、運用処
 APIは共有BFFキーを必須にし、公開ドキュメントを閉じ、本番Cookie・Host・TLS設定を起動時に検証します。
 ログイン10回/分・通常240回/分・全体6000回/分の制限をDBで共有します。
 Neon Freeでは接続試行自体のIP遮断はできません。TLS・認証・権限分離で保護し、攻撃を完全に遮断する保証はありません。
-## ポートフォリオ用デモへの切り替え
+## ポートフォリオで通常利用とデモ利用を共存させる
 
 `terraform/vercel`の`app_env`は`production`のみを許可する。`demo_mode`は既定falseで、デモは自動で有効にしない。
-専用DB・制限付きruntime role・専用非公開バケットを準備し、`runtime`の接続先を設定した後、
+通常の`DATABASE_URL`・`AWS_*`・`SECRET_KEY`・BFF設定は維持する。
+専用DB・制限付きruntime role・専用非公開バケットを準備し、
+`runtime`に`DEMO_DATABASE_URL`・`DEMO_SECRET_KEY`・`DEMO_AWS_*`を追加した後、
 `app_env = "production"`を維持し、`demo_mode = true`と`demo_data_isolated = true`を設定する。
 このフラグは実際のバケット・DB分離の検査や資源作成を行わないため、設定確認を省略しない。
-FrontendとBackendへ`APP_ENV=production`と`DEMO_MODE=true`を渡し、Backendのメールを無効にし、BFFとは別のCRON_SECRETを使う。
+FrontendとBackendへ`APP_ENV=production`と`DEMO_MODE=true`を渡す。通常メール設定は維持し、デモのメール送信だけを抑止する。
+同じBackend Project内の回収CronはVercelが送る`CRON_SECRET`を使用し、JWT/BFFの秘密とは分ける。
 Backend CIは`APP_ENV=production`を検証したうえで、取得したDEMO_MODEに応じてデモの日次Cron設定を追加する。
-デモと通常のごみ箱回収は併用しない。デモ無効の場合だけ、明示した通常回収設定からごみ箱Cronを生成する。
+デモ回収は専用DB、明示した通常ごみ箱回収は既存DBに固定し、別の日次Cronとして併用できる。
 
 2026-10-08に、提案と実装の不一致を修正し、実行環境とデモ機能を分離する方針へ戻した。
 決定・変更・検証記録の正はBackendの`docs/decisions/2026-10-08-demo-mode.md`とする。
@@ -369,7 +372,7 @@ Vercelの`sensitive`な`DATABASE_URL`は復号していない。DB接続先はTe
    バケット側も1ファイル5MiBを上限にし、既存の5MiBのデモ制限と揃える。
 4. `default-avatar.png`だけをリポジトリの静的ファイルから用意する。利用者が書くファイルは`demo/<UUID>/`配下に限定する。
    Backendの既存S3互換APIとpresigned方式、Frontendのupload planを継続する。
-5. Vercelの既存2プロジェクトと公開URLは維持する。専用資源を検証した後に接続先を切り替える。
+5. Vercelの既存2プロジェクトと公開URL・通常の接続設定を維持する。専用資源を検証した後にデモ専用接続を追加する。
    既存DB・Storage・stateは保持し、通常データの削除や既存Projectの置き換えをplanに含めない。
 
 Supabaseの静的S3 access keyは、同じProject内の**全バケットに全S3操作を許可し、RLSを迂回する**。
@@ -403,7 +406,7 @@ JWTによるStorage RLSへ移行する方式は、現在のFastAPI認証とS3構
   state自体は運用側の既存`syncnesto_terraform`に置き、デモ業務DBへstateを複製しない。
   新stateの初回構築と既存stateの更新を分け、既存CIの「空state拒否」を外さない。
 - Vercelの環境変数は既存のstateで一元管理する。別stateから同じ環境変数を重複管理しない。
-  `runtime_state`への入力元だけを明示的に選択できるようにする。
+  `runtime_state`の通常入力元は変えず、`TF_VAR_demo_runtime_enabled=true`でデモ専用入力を追加する。
   現在の`terraform` / `migrate` / `seed` / `verify-database`は既存Neonのoutputを読むため、
   デモ用のtargetを明示し、旧host / Project / bucketを拒否してから実行する経路が必要。
 - `scripts/deploy/storage.py`は既存Project・bucketが固定されている。デモのprepare/verify/cleanupに流用せず、
@@ -414,10 +417,11 @@ JWTによるStorage RLSへ移行する方式は、現在のFastAPI認証とS3構
   サンプルはデモ開始時に既存`DemoService`で生成する。既存Alembic履歴や認可モデルは変更しない。
 - `DEMO_DATA_ISOLATED=true`は運用上の確認宣言であり、資源ID・接続先・キーの分離を自動検査しているわけではない。
   flagだけで公開せず、Project ID、DB host、runtime権限、private bucket、鍵の所属を確認した記録を残す。
-- Backendの`MIGRATION_DATABASE_URL`、Infra CIのDB/S3入力元とProduction用tfvarsも切り替え対象になる。
-  手元の変更だけで運用し、次のCIで既存接続先や`demo_mode=false`へ戻る状態を作らない。
+- 通常の`MIGRATION_DATABASE_URL`、Infra CIのDB/S3入力元は維持する。
+  デモmigration・seed・回収は`demo`コマンドで専用targetを指定する。
+  公開前にCIにも追加のデモ入力と有効化設定を揃え、次のCIでデモ設定が消える状態を作らない。
 
-#### 切り替えと戻し方
+#### デモ接続の追加と停止
 
 1. 新規資源の作成先・無料枠・費用を確認し、専用資源だけを作成する。
    ID・host・bucket・roleと配置を秘密なしの一覧へ追記し、作成planに既存資源の削除・置き換えがないことを確認する。
@@ -427,18 +431,16 @@ JWTによるStorage RLSへ移行する方式は、現在のFastAPI認証とS3構
 3. pushが許可された後に`DEMO_MODE`修正とデモ準備コードをCIで検証する。
    本番移行前に既存DB・stateと非秘密設定の一覧を所有者専用でbackupし、秘密の戻し先を安全に確保する。
    新DBのdirect URIとruntime pooler URIが同じ専用Projectを参照することを確認する。
-4. 短い切り替え時間を設け、Backend→Frontendの順に公開する。新DB/S3キーと専用JWT署名キー・BFFキー・Cron秘密を使う。
-   JWTを分け、通常環境のCookieをデモDBで受け付けない。BFFキーの変更は両方のデプロイに揃える。
-   `APP_ENV=production`、両方の`DEMO_MODE=true`、Backendの`DEMO_DATA_ISOLATED=true`、
-   `EMAIL_PROVIDER=disabled`、`DELETED_DATA_CLEANUP_MODE=disabled`を設定する。
-   接続先・環境変数変更は再デプロイ後の動作まで確認し、旧deploymentとの一時的不整合も切り替え時間に含める。
+4. Backend→Frontendの順に公開する。通常DB/S3/JWT/BFFの設定を保持し、デモ専用DB/S3/JWTの設定だけを追加する。
+   `APP_ENV=production`、両方の`DEMO_MODE=true`、Backendの`DEMO_DATA_ISOLATED=true`を設定する。
+   通常ログインは既存DB、署名・audienceを検証したデモCookieは専用DBへ向くことを確認する。
+   通常のメールと30日ごみ箱回収設定は維持する。API URL・Cookie名・CSRF・RBACは継続する。
 5. 公開URLで2人の別デモ、要件・タスク・テスト・ドキュメント、組織管理、5MiB以下の添付を確認する。
-   他デモ参照・運営権限・通常Cookieを拒否すること、ログアウト・idle/absolute失効・リセットのアクセス失効、
+   通常アカウントが従来のDB・Storageを使うこと、他デモ参照・デモの運営権限を拒否すること、ログアウト・idle/absolute失効・リセットのアクセス失効、
    業務行・User・ファイルと遅延PUTの最終回収、Cron認可と再試行を確認する。
-6. 戻す場合はデモ受付を止め、両方の`DEMO_MODE=false`、旧DB/S3接続先と対応する旧秘密・CI入力を復元して再デプロイする。
-   環境変数だけを戻したり、旧deploymentだけをpromoteして完了としない。
-   デモDBを通常DBへコピーせず、デモの回収は専用接続先で継続し、回収確認前に新資源を削除しない。
-   受付停止やデモ無効化だけでは物理回収は実行されない。回収APIを維持できない場合の専用CLIは公開前に用意する。
+6. 停止時は両方の`DEMO_MODE=false`へ変更して再デプロイする。通常接続や通常の秘密を変更・復元する必要はない。
+   デモ専用接続を残して回収API/CLIを継続し、未回収が0になる前に新資源を削除しない。
+   デモを通常DBへコピーしない。フラグ無効化だけでは物理回収完了を意味しない。
 
 ログアウト・失効時のアクセス拒否と物理削除の完了時刻は区別する。
 現行のCronは日次で、ブラウザを閉じた後の物理回収・障害再試行・発行済みPUTの最終回収が遅れる場合がある。
@@ -614,15 +616,44 @@ Freeでは停止時間の明示指定を避け、既存構成と同じ既定値�
   Vercel上のCookie / BFF / 画面を通す確認は公開切り替え後に行う。
   検証用スクリプトとログはGit対象外・権限600の`state-backups/`に保存。
 
-残りはruntime入力元・CI・公開用秘密の切り替え準備と、公開切り替え後のVercel全体フロー確認。
+残りは通常接続を保持したデモ専用runtime入力・CI Secretの追加と、公開後のVercel全体フロー確認。
 パスワードやS3キーはチャットへ送らず、所有者専用のローカル設定へ保存する。
-その後にruntime入力元・CI・公開用秘密を切り替える変更へ進む。push・公開切り替えは引き続き保留する。
+通常のDB・S3・JWT・BFF・CI Secretは置き換えない。push・公開反映は引き続き保留する。
+
+### 通常利用とデモ利用の共存設定（2026-10-08 修正）
+
+専用資源作成の承認を既存API全体の切り替えへ拡張した計画を訂正した。
+通常ログインは従来の接続先を維持し、Backendで検証済みデモセッションだけを専用接続へ振り分ける。
+現在の合意と照合結果の正はBackendの`docs/decisions/2026-10-08-demo-mode.md`。
+
+- `TF_VAR_demo_runtime_enabled=true`で`runtime`へ7つのデモ専用環境変数を追加する。
+  通常の`DATABASE_URL`・`AWS_*`・`SECRET_KEY`・BFF・通常メール設定を保持する。
+  デモの制限付きpooler URIは`demo-neon`、署名鍵は`demo`のoutputから取り、通常outputに上書きしない。
+- CIの追加入力はRepository Variableの`DEMO_RUNTIME_ENABLED` / `DEMO_SUPABASE_PROJECT_REF`と、
+  Secretの`DEMO_SUPABASE_S3_ACCESS_KEY_ID` / `DEMO_SUPABASE_S3_SECRET_ACCESS_KEY`。
+  現在は公開側へ未登録で、既定false。ローカルは承認済み`.env.demo.local`を補完に使う。
+- Backend CIには`DEMO_MIGRATION_DATABASE_URL`を追加する。通常の`MIGRATION_DATABASE_URL`は維持する。
+  デモ接続を残す間は両DBにmigrationを適用し、別host・owner direct・TLSを事前検査する。
+- 回収CLIは`DEMO_DATABASE_URL`と`DEMO_AWS_*`を使う。運用専用processの通常接続は接続不能な
+  `unused.invalid`へ固定し、通常資源を利用できない。migration / RBAC seedは従来どおり専用DBのdirect接続を使う。
+- Vercel Cronの秘密は同一Project内の共通`CRON_SECRET`を維持する。
+  Vercelが自動送信する秘密はProject単位のため、デモ専用の別秘密へ置き換えない。
+  デモは専用DB、30日ごみ箱回収は既存DBへ固定し、日次ジョブを分ける。
+  [Cron認証](https://vercel.com/docs/cron-jobs/manage-cron-jobs)、
+  [Hobbyの頻度制限](https://vercel.com/docs/cron-jobs/usage-and-pricing)。
+
+クラウド資源・公開環境変数の変更、migration、push、デプロイは今回の修正で実行していない。
+停止時は両方の`DEMO_MODE=false`とし、専用接続と回収を残す。通常接続を戻す作業は不要。
+Backendのデプロイ設定生成は、受付停止後も専用接続が設定されている間はデモ回収Cronを維持する。
+この修正のローカル検証はPython単体28件、ruff / format、6構成のTerraform validate・mock test計22件が成功。
+クラウドstateへの接続・apply・公開設定変更は行っていない。
 
 ## 通常データの30日保持後の定期回収
 
 `terraform/vercel` の `deleted_data_cleanup_mode` は既定 `disabled`。
 通常環境だけで `deleted_data_cleanup_tenant_ids` を明示し、まず `dry_run` で対象確認する。
-候補・監査結果を確認後に `execute` へ変更する。Demoとの併用と対象未指定をplan時に拒否する。
+候補・監査結果を確認後に `execute` へ変更する。対象未指定をplan時に拒否する。
+デモ回収とは接続先・対象を分けて併用できる。
 既存のBackend専用 `CRON_SECRET` を使い、Frontendには回収設定・秘密を渡さない。
 
 Backendのデプロイ設定生成がmodeに応じて `/internal/trash/cleanup` の日次Cronを登録する。
