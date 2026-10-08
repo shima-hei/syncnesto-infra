@@ -10,6 +10,7 @@ COMMANDS = {
     "ci": ("ci", "既存の共有stateで全構成をplan/apply"),
     "migrate": ("migrate", "バックエンドのAlembic migration"),
     "seed": ("seed", "RBACと初期管理者の作成"),
+    "tenant-owner": ("tenant_owner", "Default Tenantの指定Ownerを初期化"),
     "storage": ("storage", "非公開バケットの準備・検証・清掃"),
     "bootstrap-state": ("bootstrap_state", "既存stateのバックアップ・共有DBへの移行"),
     "verify-state": ("verify_state", "stateの権限分離・TLS・ロックの検証"),
