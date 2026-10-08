@@ -3,6 +3,11 @@
 Syncnestoのローカル開発環境と、無料プランの公開環境を管理します。
 公開URL: [Syncnesto](https://syncnesto.vercel.app/login)。
 
+2026-10-08の最新運用状態: 通常・デモの共存を公開済み。通常ごみ箱はTenant 1だけを対象に
+30日経過後の回収を`execute`で有効化した。管理4サービスのMFA/Passkeyと、DB・state・ファイルの
+ローカル復元を確認済み。詳細と残課題は末尾の「2026-10-08の運用確認」を参照する。
+以下の準備履歴にある`disabled`・push保留・公開未実施は、その時点の状態である。
+
 ## 構成
 
 ```text
@@ -684,4 +689,122 @@ Backendのデプロイ設定生成がmodeに応じて `/internal/trash/cleanup` 
 上限は `deleted_data_cleanup_limit`（1〜100）、予算は `deleted_data_cleanup_budget_seconds`（1〜40）で指定する。
 時間予算は実行中の処理を中断する厳密な期限ではない。残件は次回または既存の手動CLIで回収する。
 設定・失敗時の再試行・結果確認は [Backendの運用手順](../syncnesto-backend/docs/deleted-data-cleanup.md) を参照。
-この変更ではcloud apply・Productionの回収モード有効化・実データ削除を行わない。
+この機能の追加時点ではcloud apply・Productionの回収モード有効化・実データ削除は行わなかった。
+Productionの有効化結果は次節に記録する。新規環境向けの変数の既定値は`disabled`を維持する。
+
+## 2026-10-08の運用確認
+
+ユーザーの「順番通り1、2を進める」指示に従い、通常ごみ箱の有効化、管理アカウントと
+権限・バックアップ復元を確認した。通常DB・Storage・JWT/BFF・メール設定とデモ専用接続を維持した。
+Vercel Hobbyを維持し、有料資源・プラン変更・公開先の置き換えは行っていない。
+
+### 通常ごみ箱の有効化
+
+- 通常DBの既存Tenant 1（Default Tenant / `default` / active）だけを許可対象にした。
+  通常DBにデモ台帳はなく、読み取り専用の事前確認で30日経過した回収候補は0件だった。
+- 5つのTerraform stateを退避後、`DELETED_DATA_CLEANUP_MODE`と
+  `DELETED_DATA_CLEANUP_TENANT_IDS`の2変数だけを変更した。
+  `dry_run`で公開確認し、その後`execute`へ進めた。対象は`[1]`、保持期間30日、上限20資源、予算20秒。
+  他の通常・デモ・Frontend設定はID・種別・更新日時・内容のdigest比較で一致した。
+- dry-run deploymentは`dpl_7sa3Tw1xX4LJcTP8bgUjyQJvRfku`、execute deploymentは
+  `dpl_Ft3paXCHkrkYdMDtLDjmtSsTVRpy`。両方Production / READY、Backend commit
+  `7183e0ca6dc7e358f4e47cf6077bc603691c2c87`で、アプリ実装は変更していない。
+- 両モードの正しいCron秘密による手動呼び出しは200 / completed。
+  candidate / purged / failed / skippedはすべて0、`has_more=false`。
+  候補がないため実データ削除と`trash.cleanup`監査行の生成はなかった。
+  候補がある場合の監査記録は関連テストで検証したが、公開監査UIの実行行は未確認。
+- 通常ごみ箱は`/internal/trash/cleanup` / `0 19 * * *`（JST 04時台）、
+  デモは`/internal/demo/cleanup` / `0 18 * * *`（JST 03時台）の別Cronを実デプロイに確認した。
+  日次スケジュールによる初回実行はまだ観測していない。手動HTTP実行の確認とは区別する。
+- ヘルス200、無認証の回収403、Backend直通の`/auth/me`403を確認した。
+  公開BFFで通常ログイン・Secure/HttpOnly Cookie・CSRF拒否・ログアウト失効・429/Retry-Afterも成功した。
+  検証によるsession・認証監査等の更新はあり、業務データとアバターは変更していない。
+- Backend関連27件が成功。Infra `make check`はruff / format、Python 30件、
+  全6構成のTerraform validateとmock test計22件が成功した。
+
+### アカウントと権限
+
+| 対象 | 確認した状態 |
+| --- | --- |
+| Vercel | 2FA Active、Passkey 1件、TOTP Enrolled。現在のPasskeyを維持 |
+| GitHub | 本人設定後の画像で認証アプリConfigured、Recovery codes Viewed |
+| Neon | 本人設定後の画像で認証アプリによる2FA有効 |
+| Supabase | 本人設定後の画像でMFA登録済み（2026-10-08 22:18 JST） |
+
+Supabaseは[復旧コードを発行せず、予備TOTPを推奨する](https://supabase.com/docs/guides/platform/multi-factor-authentication)。
+画像上は認証アプリ1件のため、別の端末・保管先による予備は本人側の残確認とする。
+認証アプリの秘密・QR・復旧コードは取得・保存していない。
+
+- 通常・デモの`syncnesto_app`、stateの`syncnesto_tfstate`はTLS証明書検証済み。
+  superuser / createdb / createrole / replication / bypassrls / inheritはすべてfalse。
+  アプリのpublic schema CREATEを拒否し、通常アプリDBとstate DB間のCONNECTを相互に拒否した。
+  デモProjectにはstate DB自体が存在しないため、そのDBへのCONNECT拒否テストは対象外。
+- 通常・デモのバケットはいずれもprivate、S3キーも別である。
+  S3キーは各Project内の全バケットを操作できる既存仕様のため、Project分離を維持する。
+- GitHub 3リポジトリのcollaboratorは`shima-hei`のadminだけで、production Environmentはmain限定。
+  Vercel teamも本人OWNER 1件・mfaEnabled=trueを確認した。
+  Neon通常Projectの本人org/project adminは運用者権限であり、アプリのruntime権限とは分離している。
+
+管理トークンの確認結果（値は記録しない）:
+
+| 対象 | 用途・期限・範囲 | 残確認 |
+| --- | --- | --- |
+| Vercel `Terrafrom用` | 2027-10-03期限 | 実際のscopeの確認 |
+| Neon `Terraform` | 2026-10-04作成、2026-10-08利用 | scope・有効期限の確認 |
+| Supabase `terraform` | 通常Project 1件、2027-01-02期限、35項目RW・7項目Read。本人確認でCodex等のSupabase接続にも使用 | 既存接続を維持。縮小時はCodex側の必要操作も確認 |
+| Supabase `syncnesto-demo-storage-setup` | デモProject 1件、2026-10-15期限、Project Settings / API Keys / API Key SecretsのReadのみ | 既存の短期・専用設定を維持 |
+
+Supabaseの既存コードは、準備時に管理APIからAPIキーを取得し、一時的なservice_roleでStorageを設定する。
+通常Project向けPATはCodex等の管理接続にも使うため、Storage準備だけを根拠にReadへ変更しない。
+将来分離するなら、Storage準備用にはデモ準備用と同じ3つのRead権限だけを持つ短期PATを使い、
+Codex接続用は必要な管理操作を列挙して権限を絞る。SyncnestoアプリのMCPがこの管理PATを使う設計にはしない。
+APIキーを読める権限は強い権限であり、短期・Project限定・運用時のみの扱いを維持する。
+今回、管理トークン・DBパスワード・JWT/BFF鍵の一括rotationは実行していない。
+
+### バックアップと実際の復元
+
+- 通常Neon（PostgreSQL 17.11）の66テーブル・233行、Terraform state DBの5テーブル・5行を
+  読み取り専用接続の`pg_dump`で取得した。通常dump 366,407 bytes、state dump 20,968 bytes。
+  取得前後の全行digestを比較し、取得中に内容が変わっていないことを確認した。
+- Supabase通常Storageは2オブジェクト・1,104,355 bytes。
+  DB dumpに含まれないファイル本体を別に保存し、key・SHA-256・ContentType・Metadataを記録した。
+- 通信を`--network none`で遮断し、公開portなし・tmpfsの破棄可能なPostgreSQLコンテナへ
+  両dumpを`pg_restore --exit-on-error --no-owner --no-acl`で実際に復元した。
+  66+5テーブルの全行digestが元のバックアップと一致した。
+- ファイルも専用のローカルLocalStack bucketへS3 PUT/GETし、全2件のkey・bytes・ContentType・
+  Metadataが一致した。復元用コンテナとローカルbucketは検証後に削除した。
+  バックアップ・復元でProductionへの書き込みは0件。
+- 証跡とデータはGit対象外の`state-backups/operations-20261008/`に保存した。
+  `backup/manifest.json`・`restore-result.json`・`least-privilege.json`、state・plan・生ログは
+  owner専用（directory 700 / file 600）。秘密やファイル本文はGit・Actions artifactに含めない。
+- 初回のCA bind mountはDocker VMからCAパスを参照できず失敗した。
+  公開CA証明書を所有者専用ディレクトリへコピーして再実行し、TLS検証を維持したまま成功した。
+
+ここまでで確認したのは論理データとS3互換ファイルのローカル復元である。
+新しいNeon/Supabaseへのクラウド復旧・owner/ACL復元・アカウント喪失時の復旧は未実施。
+実復旧時は既存Terraformで制限付きroleと権限を再適用してから接続を戻す。
+バックアップは現時点でこのMacだけにあり、端末外保管と自動取得は未設定。
+デモは使い捨てデータのためバックアップせず、migration・RBAC seedで再構築する。
+
+### 秘密の更新手順と残課題
+
+1. 利用先を列挙し、同等以下の権限・必要な対象だけの新キーを発行する。
+   ブラウザで新規認証情報を入力・確定する操作は本人が行う。
+2. Git対象外・owner専用のローカル設定と、必要なGitHub production Secretsだけを更新する。
+   管理PATはBackendやFrontendへ渡さない。
+3. runtime資格情報なら対応する`credential_version`を確認してplanを作る。
+   このversionは複数の秘密のwrite-only更新を制御するため、全体を無条件に増やさない。
+   意図した変数以外に更新があれば適用前に確認する。
+4. Backendを再デプロイしてDB/Storage・通常/デモの接続を検証後、旧キーを失効する。
+   JWT鍵更新は通常セッションを失効させ、BFF鍵更新はBackendとFrontendの同期が必要なので個別に扱う。
+
+運用開始と復元検証は完了。継続する運用項目は管理キーのscope確認・用途別分離・期限前rotation、
+Supabaseの予備認証手段、バックアップの端末外保管・自動化、日次Cronの初回観測。
+次の開発は既存Backendの認証・RBAC・監査を通すCodex向けMCP（要件定義・テスト設計の作成）。
+ブラウザのfilechooserからの送信確認も前回公開時の残件であり、API経由の添付検証とは区別する。
+
+Frontend開発依存の`braces`について、2026-10-08の[公式advisory](https://github.com/advisories/GHSA-vfj7-8cjw-p6xm)は
+影響範囲`<=3.0.3`・Patched versions None。本番依存の監査は前回公開CIで成功済み。
+`npm explain braces`ではshadcn側だけでなくeslint-config-next側からも入るため、shadcn削除だけでは解消しない。
+依存の置換・保守forkによる対応も可能だが、今回は監査を継続し、開発ツールへ未検証のglobを渡さず、
+公式修正版を待つ。監査除外・古いmajorへの自動downgrade・AI/Eveの再開は行わない。
