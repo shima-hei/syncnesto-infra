@@ -622,6 +622,23 @@ Freeでは停止時間の明示指定を避け、既存構成と同じ既定値�
 
 ### 通常利用とデモ利用の共存設定（2026-10-08 修正）
 
+この節の「未登録」「未実施」「push保留」は公開承認前の履歴。
+ユーザーのマージ・適用・公開環境変更の指示を受け、2026-10-08に以下を実施した。
+
+- release PR #6をマージし、保存・確認済みplanからruntimeのデモ専用7変数とvercelの11資源を追加した。
+  削除・置換・通常接続の変更はなく、既存Backend 20変数・Frontend 5変数の内容とProject IDを維持した。
+  通常DBの業務件数・schema revisionと通常Storageの2オブジェクトも維持している。
+- Infraのproduction Secretに専用S3キー、Repository Variableに専用Project refと受付用runtimeフラグを追加した。
+  Backendのproductionへ専用migration Secretを追加し、通常Secretは置き換えていない。
+- 新規CI runnerで専用stateの初期化不足、次にProduction jobのPython依存不足が分かった。
+  PR #7と#8で修正し、main `97ab4e0`のCI run `37753473756`はchecks・Production planとも成功した。
+  通常CIの操作対象は既存3構成のまま、専用2stateはinitと読み取りだけに留める。
+- 実行前に5stateをバックアップした。クラウドの秘密・state・plan・生ログはGit対象外の
+  所有者専用`state-backups/release-20261008/`に保存し、この記録には含めない。
+- VercelはHobbyを維持。新たな有料資源・プラン変更は行っていない。
+  公開デプロイとCookie/BFF/画面/回収の最終結果はBackendの決定記録へ記載する。
+  通常ごみ箱の回収modeは`disabled`のまま維持する。
+
 専用資源作成の承認を既存API全体の切り替えへ拡張した計画を訂正した。
 通常ログインは従来の接続先を維持し、Backendで検証済みデモセッションだけを専用接続へ振り分ける。
 現在の合意と照合結果の正はBackendの`docs/decisions/2026-10-08-demo-mode.md`。
