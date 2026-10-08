@@ -7,6 +7,7 @@ import sys
 import urllib.error
 import urllib.request
 from datetime import UTC, datetime, timedelta
+from dataclasses import dataclass
 from uuid import uuid4
 
 import boto3
@@ -22,6 +23,25 @@ ORIGIN = "https://syncnesto.vercel.app"
 MAX_BYTES = 20 * 1024 * 1024
 
 
+@dataclass(frozen=True)
+class StorageTarget:
+    """操作先をクライアント・バケット設定・実通信検証で共有する。"""
+
+    project: str = PROJECT
+    bucket: str = BUCKET
+    region: str = "ap-southeast-1"
+    origin: str = ORIGIN
+    max_bytes: int = MAX_BYTES
+
+    @property
+    def endpoint(self) -> str:
+        """ProjectからS3 endpointを組み立て、任意hostを受け付けない。"""
+        return f"https://{self.project}.storage.supabase.co/storage/v1/s3"
+
+
+PORTFOLIO = StorageTarget()
+
+
 def request(url: str, *, method: str = "GET", headers=None, body=None):
     """応答とHTTP statusを返す。URLや資格情報はログに出さない。"""
     req = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
@@ -32,11 +52,11 @@ def request(url: str, *, method: str = "GET", headers=None, body=None):
         return error.code, error.headers, error.read()
 
 
-def storage_headers() -> dict[str, str]:
+def storage_headers(target: StorageTarget = PORTFOLIO) -> dict[str, str]:
     """管理APIからservice_roleを一時的に読み、バケット操作だけに使用する。"""
     token = os.environ["SUPABASE_ACCESS_TOKEN"]
     status, _, body = request(
-        f"https://api.supabase.com/v1/projects/{PROJECT}/api-keys?reveal=true",
+        f"https://api.supabase.com/v1/projects/{target.project}/api-keys?reveal=true",
         headers={"Authorization": "Bearer " + token},
     )
     if status != 200:
@@ -51,14 +71,19 @@ def storage_headers() -> dict[str, str]:
     }
 
 
-def s3_client():
+def s3_client(
+    target: StorageTarget = PORTFOLIO,
+    *,
+    access_key: str | None = None,
+    secret_key: str | None = None,
+):
     """アプリと同じ署名・path形式・checksum設定でクライアントを作る。"""
     return boto3.client(
         "s3",
-        endpoint_url=ENDPOINT,
-        region_name="ap-southeast-1",
-        aws_access_key_id=os.environ["SUPABASE_S3_ACCESS_KEY_ID"],
-        aws_secret_access_key=os.environ["SUPABASE_S3_SECRET_ACCESS_KEY"],
+        endpoint_url=target.endpoint,
+        region_name=target.region,
+        aws_access_key_id=access_key or os.environ["SUPABASE_S3_ACCESS_KEY_ID"],
+        aws_secret_access_key=secret_key or os.environ["SUPABASE_S3_SECRET_ACCESS_KEY"],
         config=Config(
             signature_version="s3v4",
             s3={"addressing_style": "path"},
@@ -68,49 +93,49 @@ def s3_client():
     )
 
 
-def prepare(s3) -> None:
-    """非公開・20MiB上限のバケットを冪等に用意する。"""
-    headers = storage_headers()
-    base = f"https://{PROJECT}.supabase.co/storage/v1/bucket"
-    status, _, _ = request(f"{base}/{BUCKET}", headers=headers)
+def prepare(s3, target: StorageTarget = PORTFOLIO) -> None:
+    """指定先の非公開バケットとサイズ上限を冪等に用意する。"""
+    headers = storage_headers(target)
+    base = f"https://{target.project}.supabase.co/storage/v1/bucket"
+    status, _, _ = request(f"{base}/{target.bucket}", headers=headers)
     if status not in (200, 400, 404):
         raise RuntimeError(f"Cannot inspect bucket (HTTP {status})")
-    settings = {"public": False, "file_size_limit": MAX_BYTES}
+    settings = {"public": False, "file_size_limit": target.max_bytes}
     if status != 200:
-        settings.update({"id": BUCKET, "name": BUCKET})
+        settings.update({"id": target.bucket, "name": target.bucket})
     status, _, _ = request(
-        f"{base}/{BUCKET}" if status == 200 else base,
+        f"{base}/{target.bucket}" if status == 200 else base,
         method="PUT" if status == 200 else "POST",
         headers=headers,
         body=json.dumps(settings).encode(),
     )
     if status not in (200, 201):
         raise RuntimeError(f"Cannot configure private bucket (HTTP {status})")
-    status, _, body = request(f"{base}/{BUCKET}", headers=headers)
+    status, _, body = request(f"{base}/{target.bucket}", headers=headers)
     metadata = json.loads(body)
     if (
         status != 200
         or metadata.get("public") is not False
-        or metadata.get("file_size_limit") != MAX_BYTES
+        or metadata.get("file_size_limit") != target.max_bytes
     ):
         raise RuntimeError("Bucket privacy or size limit could not be verified")
     s3.put_object(
-        Bucket=BUCKET,
+        Bucket=target.bucket,
         Key="default-avatar.png",
         Body=(ROOT / "default-avatar.png").read_bytes(),
         ContentType="image/png",
     )
-    print("PASS: private bucket, 20MiB file limit, default avatar prepared")
+    print("PASS: private bucket, configured file limit, default avatar prepared")
 
 
-def verify(s3) -> None:
+def verify(s3, target: StorageTarget = PORTFOLIO) -> None:
     """署名付きURL・CORS・匿名アクセス拒否を実通信で確認する。"""
     key = "security-probes/" + uuid4().hex
     content = b"syncnesto private storage probe\n"
     put_url = s3.generate_presigned_url(
         "put_object",
         Params={
-            "Bucket": BUCKET,
+            "Bucket": target.bucket,
             "Key": key,
             "ContentType": "text/plain",
             "ContentLength": len(content),
@@ -122,36 +147,36 @@ def verify(s3) -> None:
             put_url,
             method="OPTIONS",
             headers={
-                "Origin": ORIGIN,
+                "Origin": target.origin,
                 "Access-Control-Request-Method": "PUT",
                 "Access-Control-Request-Headers": "content-type",
             },
         )
         if (
             status not in (200, 204)
-            or headers.get("Access-Control-Allow-Origin") not in (ORIGIN, "*")
+            or headers.get("Access-Control-Allow-Origin") not in (target.origin, "*")
             or "PUT" not in headers.get("Access-Control-Allow-Methods", "")
         ):
             raise RuntimeError("Browser PUT preflight failed")
         status, headers, _ = request(
             put_url,
             method="PUT",
-            headers={"Content-Type": "text/plain", "Origin": ORIGIN},
+            headers={"Content-Type": "text/plain", "Origin": target.origin},
             body=content,
         )
         if status not in (200, 201) or headers.get(
             "Access-Control-Allow-Origin"
-        ) not in (ORIGIN, "*"):
+        ) not in (target.origin, "*"):
             raise RuntimeError(f"Presigned PUT failed (HTTP {status})")
         get_url = s3.generate_presigned_url(
-            "get_object", Params={"Bucket": BUCKET, "Key": key}, ExpiresIn=600
+            "get_object", Params={"Bucket": target.bucket, "Key": key}, ExpiresIn=600
         )
         status, _, body = request(get_url)
         if status != 200 or body != content:
             raise RuntimeError("Presigned GET returned incorrect content")
         for url in (
             get_url.split("?", 1)[0],
-            f"https://{PROJECT}.supabase.co/storage/v1/object/public/{BUCKET}/{key}",
+            f"https://{target.project}.supabase.co/storage/v1/object/public/{target.bucket}/{key}",
         ):
             status, _, _ = request(url)
             if status < 400:
@@ -160,7 +185,7 @@ def verify(s3) -> None:
         status, _, _ = request(tampered)
         if status < 400:
             raise RuntimeError("Invalid signature unexpectedly succeeded")
-        result = s3.get_object(Bucket=BUCKET, Key=key)
+        result = s3.get_object(Bucket=target.bucket, Key=key)
         try:
             if result["Body"].read() != content or result["ContentLength"] != len(
                 content
@@ -172,7 +197,7 @@ def verify(s3) -> None:
             "PASS: signed PUT/GET, SDK read, browser preflight, anonymous and invalid-signature rejection"
         )
     finally:
-        s3.delete_object(Bucket=BUCKET, Key=key)
+        s3.delete_object(Bucket=target.bucket, Key=key)
 
 
 def cleanup(s3, execute: bool) -> None:

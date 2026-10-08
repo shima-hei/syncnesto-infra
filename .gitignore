@@ -5,6 +5,7 @@
 .env.*
 !.env.example
 !.env.terraform.local.example
+!.env.demo.local.example
 .localstack/
 state-backups/
 /docs/

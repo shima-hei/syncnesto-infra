@@ -328,7 +328,8 @@ migration・seedなどの運用コマンドは`DEMO_MODE=false`を明示し、�
 
 ### デモ専用資源の分離準備（2026-10-08）
 
-状態: 現構成の読み取り調査と移行設計を完了。以下は資源作成前の案であり、cloud apply・環境変数変更・デプロイは未実施。
+状態: 配置案はユーザー承認済み。専用構成と操作コマンドのローカル実装・検証を完了。
+cloud apply・環境変数変更・デプロイは未実施。
 ユーザー指示に従いローカルコミットまでとし、pushは保留する。
 `APP_ENV=production` / `DEMO_MODE=true` の方針は変更しない。
 
@@ -352,15 +353,15 @@ Vercelの`sensitive`な`DATABASE_URL`は復号していない。DB接続先はTe
 
 #### 分離する資源
 
-1. **Neonに空の新規Project `syncnesto-demo`を作る案**とする。既存のproduction branchやstate DBの複製は行わない。
+1. **Neonに空の新規Project `syncnesto-demo`を作る**。既存のproduction branchやstate DBの複製は行わない。
    同じOrganization `org-empty-dew-85265327`、同じSingapore regionを候補とし、PostgreSQL 17、compute 0.25 CU、
    Freeの自動停止と6時間の履歴保持を維持する。実際のID・hostは作成後に記録し、既存IDを推測で流用しない。
 2. 新しいDBにも既存と同じ`syncnesto_owner` / `syncnesto_app`の権限分離を適用する。
    資格情報は新規生成し、runtimeはpooler、migration・検証・backupはdirect接続、いずれも`sslmode=verify-full`を要求する。
    runtimeにowner URI・Terraform state接続・クラウド管理トークンを渡さない。
-3. **Supabaseにも別Project `syncnesto-demo`とprivate bucket `syncnesto-demo`を作る案**とする。
-   既存Organization `shima-hei`（`yxsnqlgubcohdavdcpry`）とSingapore regionを候補にするが、
-   作成先Organizationの選択と実際の作成費用は、資源作成前にユーザーへ確認する。
+3. **Supabaseにも別Project `syncnesto-demo`とprivate bucket `syncnesto-demo`を作る**。
+   2026-10-08に既存Organization `shima-hei`（`yxsnqlgubcohdavdcpry`）での作成をユーザーが承認した。
+   Singapore regionを使用する。作成前の費用確認は別途行い、課金を伴う作成はしない。
    新しいProject専用S3キーを使い、既存Projectのキー・オブジェクトを持ち込まない。
    バケット側も1ファイル5MiBを上限にし、既存の5MiBのデモ制限と揃える。
 4. `default-avatar.png`だけをリポジトリの静的ファイルから用意する。利用者が書くファイルは`demo/<UUID>/`配下に限定する。
@@ -395,7 +396,7 @@ JWTによるStorage RLSへ移行する方式は、現在のFastAPI認証とS3構
 
 - 現在の`neon_project.portfolio`と`portfolio_state` / `database_state` / `runtime_state`は維持する。
   `project_name`の書き換えで既存Projectをデモ用に転用しない。
-- デモのNeon資源・runtime roleには独立した構成とstate schema（案: `demo_resources_state` / `demo_database_state`）を用意する。
+- デモのNeon資源・runtime roleには独立した構成とstate schema（`demo_resources_state` / `demo_database_state`）を用意する。
   state自体は運用側の既存`syncnesto_terraform`に置き、デモ業務DBへstateを複製しない。
   新stateの初回構築と既存stateの更新を分け、既存CIの「空state拒否」を外さない。
 - Vercelの環境変数は既存のstateで一元管理する。別stateから同じ環境変数を重複管理しない。
@@ -441,12 +442,80 @@ JWTによるStorage RLSへ移行する方式は、現在のFastAPI認証とS3構
 Neonの履歴・所有者専用backupに残るデータの即時消去も保証しない。
 「終了と同時に全媒体から完全削除」とは案内せず、体験終了後にアクセスを失効し、回収を再試行する現在の仕様を維持する。
 
-#### 次に実装する範囲
+#### 専用資源の操作コマンド
 
-資源配置と作成先を確認した後、デモ用state/target、RBACだけのseed、Storage操作先の明示、
-接続先の分離検証と専用回収CLIを実装・ローカル検証する。
-その後に専用資源の作成・実通信検証へ進む。push・公開切り替えは引き続き別途のユーザー指示を待つ。
-API仕様・DBモデル・Frontendの業務処理は、この調査・移行設計では変更していない。
+`terraform/demo`は空のNeon Projectと独立したJWT/BFF/Cron秘密、`terraform/demo-neon`は既存と同じ制限付きroleを扱う。
+既存のrole構成・resource addressは変更せず、デモ用の接続先検査を追加した別stackにした。
+通常のCIが実行するstackは従来の3つに限定し、追加のデモstackを自動applyしない。
+`make check`のローカル検証にはデモの2構成も含める。
+
+費用・無料プラン確認と既存stateのbackupが終わってから、以下を実施する。
+`init`は共有stateに専用schemaを作るため、この準備段階では実行していない。
+`free_plan_confirmed`は確認宣言であり、Neonの請求情報を自動検査する機能ではない。
+
+```sh
+uv run python -m scripts.deploy terraform demo init -input=false -lockfile=readonly
+uv run python -m scripts.deploy terraform demo plan -input=false -var=free_plan_confirmed=true -out=demo.tfplan
+# planの新規資源だけを確認してからapply。生のplan・stateを公開しない。
+uv run python -m scripts.deploy terraform demo apply -input=false demo.tfplan
+
+uv run python -m scripts.deploy terraform demo-neon init -input=false -lockfile=readonly
+uv run python -m scripts.deploy terraform demo-neon plan -input=false -out=demo-neon.tfplan
+uv run python -m scripts.deploy terraform demo-neon apply -input=false demo-neon.tfplan
+
+uv run python -m scripts.deploy demo migrate
+uv run python -m scripts.deploy demo seed
+uv run python -m scripts.deploy demo verify-database
+```
+
+`demo`コマンドは専用stateを読み、通常Project ID・DB host・異なるpooler・state DB・TLS未検証URIを拒否する。
+`demo seed`はUser・Project・DemoSessionが0件であることを確認し、Backendの`seed_rbac --roles-only`だけを呼ぶ。
+通常の`seed`では従来どおり初期管理者を作る。API契約・DBモデル・Alembic履歴は変更しない。
+運用用Backend subprocessは`APP_ENV=production` / `DEMO_MODE=false` / メール無効で動かし、
+Terraform state・クラウド管理トークンを子プロセスへ渡さない。
+
+Storage Projectを費用確認後に作成し、専用S3キーを`.env.demo.local`またはexportした環境変数へ設定する。
+ファイルを使う場合は`.env.demo.local.example`を参考にし、所有者専用の`chmod 600`を必須とする。
+通常のS3キーへのfallbackをせず、通常Project refや通常キーの再利用を拒否する。
+prepare/verify前には管理APIで承認済みOrganization・Project名・region・稼働状態を確認し、
+指定S3 endpointでキーが認証できることを読み取りで確認する。
+
+```sh
+# SUPABASE_ACCESS_TOKENは管理APIでの所属確認用に環境へexportする。
+uv run python -m scripts.deploy demo storage prepare
+uv run python -m scripts.deploy demo storage verify
+
+# Vercelのデモ受付を止めた後も、専用DB・Storageだけを対象に確認/回収できる。
+uv run python -m scripts.deploy demo cleanup
+uv run python -m scripts.deploy demo cleanup --execute
+```
+
+回収は標準でdry-run、`--execute`で既存`DemoService`の期限切れ・所有範囲・再試行処理を使う。
+一回最大10件。台帳の`cleanup_after`まで待つ遅延PUTや障害分はpending件数に残し、後で再実行する。
+通常Identityや業務本文・署名URL・資格情報は出力せず、処理件数と未完了件数だけを表示する。
+Vercelの接続先・CI入力・公開用秘密の切り替えは、この準備用コマンドでは行わない。
+
+#### 作業・検証記録
+
+- 2026-10-08: 空のNeon＋別Supabaseという構成と、Supabase Organization `shima-hei`をユーザーが承認。
+- Supabase MCPの`get_cost`は、接続先の`tools/list`に提供されておらず利用できなかった。
+  ブラウザの[対象OrganizationのBilling](https://supabase.com/dashboard/org/yxsnqlgubcohdavdcpry/billing)で
+  Free Plan / Spend cap enabledを確認。新規Project画面のOrganizationも`shima-hei FREE`を確認した。
+  Free枠内の追加費用0 USD/月という条件をユーザーへ確認してから資源を作成する。
+  APIによる見積もり取得成功とは記録しない。
+- Backend: `--roles-only`と専用回収CLIを追加。関連PostgreSQL回帰25件成功（14.93秒、既存警告1件）。
+  通常の管理者seed維持、管理者なしのRBAC初期化、デモ無効時のdry-run/回収、既存のデモ境界・容量・破棄を含む。
+  ruff / pyright成功。API契約・DBモデルの変更がないためOrval再生成・新migrationは不要。
+- Infra: Python単体24件、ruff / format、全6構成のvalidate、模擬plan 21件成功。
+  本番CIのstack維持、通常接続先・Storageキーの拒否、private / 5MiBの指定、管理トークンの子プロセス除外を確認。
+  新規2構成のProvider lockはmacOS ARM64 / Linux AMD64を固定した。
+- `git diff --check`成功。変更は本体のBackend・Infraに別々のローカルコミットへ保存。
+- 今回のTerraform初期化は`-backend=false`でProvider検証だけを行った。共有stateのbootstrap/initやcloud applyは実行していない。
+  cloud migration/seed・Storage prepare/verify・資源作成・環境変数変更・push・デプロイは未実施。
+  クラウドの実通信検証と公開後のライフサイクル確認は、資源作成・公開切り替え後に実施する。
+
+次は、無料作成の確認後に専用資源を作成し、migration・RBAC・runtime role・private Storageを実通信で検証する。
+その後にruntime入力元・CI・公開用秘密を切り替える変更へ進む。push・公開切り替えは引き続き保留する。
 
 ## 通常データの30日保持後の定期回収
 

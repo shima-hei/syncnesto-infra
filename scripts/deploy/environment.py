@@ -17,6 +17,11 @@ STACKS = {
     "neon": ROOT / "terraform/neon",
     "runtime": VERCEL / "runtime",
 }
+DEMO_STACKS = {
+    "demo": ROOT / "terraform/demo",
+    "demo-neon": ROOT / "terraform/demo-neon",
+}
+ALL_STACKS = STACKS | DEMO_STACKS
 TOKEN_KEYS = ("VERCEL_API_TOKEN", "NEON_API_KEY")
 
 
@@ -65,10 +70,10 @@ def terraform_outputs(
     stack: str = "vercel", *, env: dict[str, str] | None = None
 ) -> dict:
     """outputをメモリ内で取得し、失敗時の生ログを表示しない。"""
-    if stack not in STACKS:
+    if stack not in ALL_STACKS:
         raise ValueError("Unknown Terraform stack")
     result = subprocess.run(
-        ["terraform", f"-chdir={STACKS[stack]}", "output", "-json"],
+        ["terraform", f"-chdir={ALL_STACKS[stack]}", "output", "-json"],
         capture_output=True,
         text=True,
         env=state_environment() if env is None else env,
