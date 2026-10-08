@@ -123,7 +123,13 @@ class DemoDatabaseTests(unittest.TestCase):
             "NEON_API_KEY": "neon-fixture",
             "DEMO_SUPABASE_S3_SECRET_ACCESS_KEY": "duplicate-fixture",
         }
-        summary = {"processed": 1, "pending": 1, "execute": True, "limit": 10}
+        summary = {
+            "processed": 1,
+            "pending": 1,
+            "remaining": 3,
+            "execute": True,
+            "limit": 10,
+        }
         result = MagicMock(returncode=0, stdout=json.dumps(summary))
         stream = io.StringIO()
         with patch.object(demo.subprocess, "run", return_value=result) as run:
@@ -134,6 +140,7 @@ class DemoDatabaseTests(unittest.TestCase):
         forwarded = run.call_args.kwargs["env"]
         self.assertEqual(set(forwarded), {"DATABASE_URL", "AWS_ACCESS_KEY_ID"})
         self.assertIn("pending=1", stream.getvalue())
+        self.assertIn("remaining=3", stream.getvalue())
         self.assertNotIn("fixture", stream.getvalue())
 
     def test_failed_child_logs_never_disclose_credentials(self):

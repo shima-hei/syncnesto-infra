@@ -172,9 +172,11 @@ def run_backend(
     if cleanup:
         data = json.loads(result.stdout)
         if (
-            set(data) != {"processed", "pending", "execute", "limit"}
+            set(data) != {"processed", "pending", "remaining", "execute", "limit"}
             or data["limit"] != 10
             or type(data["execute"]) is not bool
+            or type(data["remaining"]) is not int
+            or data["remaining"] < 0
             or any(
                 type(data[key]) is not int or not 0 <= data[key] <= 10
                 for key in ("processed", "pending")
@@ -183,7 +185,7 @@ def run_backend(
             raise RuntimeError("Invalid demo cleanup summary; raw logs were withheld")
         print(
             f"Demo cleanup: execute={data['execute']}, processed={data['processed']}, "
-            f"pending={data['pending']} (limit=10)"
+            f"pending={data['pending']}, remaining={data['remaining']} (limit=10)"
         )
     else:
         print("PASS: dedicated demo operation completed")

@@ -328,12 +328,13 @@ migration・seedなどの運用コマンドは`DEMO_MODE=false`を明示し、�
 
 ### デモ専用資源の分離準備（2026-10-08）
 
-状態: 配置案はユーザー承認済み。専用構成と操作コマンドのローカル実装・検証を完了。
-cloud apply・環境変数変更・デプロイは未実施。
+状態: 配置案・追加費用0 USD/月の条件はユーザー承認済み。専用Neonの作成・初期化・実通信検証を完了。
+Supabaseは現在のAPIトークンの作成権限不足により、ユーザーによるProject作成待ち。
+新規Neon用の2構成だけをapply済み。Vercelの環境変数変更・デプロイは未実施。
 ユーザー指示に従いローカルコミットまでとし、pushは保留する。
 `APP_ENV=production` / `DEMO_MODE=true` の方針は変更しない。
 
-#### 現構成の確認結果
+#### 作成前の現構成の確認結果
 
 | 対象 | 確認した状態 |
 | --- | --- |
@@ -491,11 +492,12 @@ uv run python -m scripts.deploy demo cleanup --execute
 ```
 
 回収は標準でdry-run、`--execute`で既存`DemoService`の期限切れ・所有範囲・再試行処理を使う。
-一回最大10件。台帳の`cleanup_after`まで待つ遅延PUTや障害分はpending件数に残し、後で再実行する。
+一回最大10件。`pending`は今回の処理対象内の未完了数で、`remaining`は利用中・遅延PUT待ち・障害待ちを含む全未完了台帳数。
+`pending=0`だけで回収完了と判断せず、`cleanup_after`まで待つ台帳は後で再実行する。
 通常Identityや業務本文・署名URL・資格情報は出力せず、処理件数と未完了件数だけを表示する。
 Vercelの接続先・CI入力・公開用秘密の切り替えは、この準備用コマンドでは行わない。
 
-#### 作業・検証記録
+#### ローカル実装の作業・検証記録
 
 - 2026-10-08: 空のNeon＋別Supabaseという構成と、Supabase Organization `shima-hei`をユーザーが承認。
 - Supabase MCPの`get_cost`は、接続先の`tools/list`に提供されておらず利用できなかった。
@@ -514,7 +516,53 @@ Vercelの接続先・CI入力・公開用秘密の切り替えは、この準備
   cloud migration/seed・Storage prepare/verify・資源作成・環境変数変更・push・デプロイは未実施。
   クラウドの実通信検証と公開後のライフサイクル確認は、資源作成・公開切り替え後に実施する。
 
-次は、無料作成の確認後に専用資源を作成し、migration・RBAC・runtime role・private Storageを実通信で検証する。
+#### 専用資源の作成・実通信検証（2026-10-08）
+
+ユーザーが「無料枠内・追加0 USD/月で作成する」を承認したため、新規資源の作成へ進んだ。
+準備コードのコミットはBackend `a328b72` / Infra `436b4a8`。push・公開切り替えは許可されていない。
+
+| 対象 | 作成・確認した状態 |
+| --- | --- |
+| Neon Organization | `org-empty-dew-85265327`、Management APIで`plan=free`を作成前・作成後に確認 |
+| 専用Project | `sweet-frost-26809709` / `syncnesto-demo`、`aws-ap-southeast-1`、PostgreSQL 17 |
+| 専用branch | `br-blue-star-b34rxuyc`、空の新規Projectから作成。既存branchから複製していない |
+| direct host | `ep-square-dew-b360h9ls.c-4.ap-southeast-1.aws.neon.tech` |
+| pooler host | `ep-square-dew-b360h9ls-pooler.c-4.ap-southeast-1.aws.neon.tech` |
+| 容量・履歴 | APIのbranch上限1,073,741,824 bytes、履歴保持21,600秒 |
+| Compute | 最小・最大0.25 CU、APIの`suspend_timeout_seconds=0`（global default）。停止無効の`-1`を指定していない |
+| 業務DB | `syncnesto`、revision `48bb3c9773b3`、User 0・Tenant 1・Project 0・DemoSession 0、約12.1MB |
+| RBAC | Role 8・Permission 38。通常ログイン用の初期管理者を作成していない |
+| DBユーザー | migration owner `syncnesto_owner`、runtime `syncnesto_app`。専用の新規パスワード |
+| 新state | `demo_resources_state` / `demo_database_state`、運用側の既存state DB内に新設 |
+| Supabase | Project未作成。既存Project用トークンでは作成を403で拒否され、作成画面をユーザーへ引き継いだ |
+| 公開状態 | 既存Vercelの接続先・秘密・環境変数・deploymentを維持。デモは未有効化 |
+
+Neon Providerの`suspend_timeout_seconds=0`はglobal default（5分）を意味する。
+Freeでは停止時間の明示指定を避け、既存構成と同じ既定値を使用した。
+根拠: [Neon Project Provider](https://registry.terraform.io/providers/kislerdm/neon/0.18.0/docs/resources/project)。
+
+- 既存の3つのremote stateを所有者専用の`state-backups/20261008T040247Z-demo-prepare/`へ保存してから新stateをinitした。
+  `bootstrap-state`は再実行していない。既存3stateのlineage / serial / resources / outputsは作成後も変更なし。
+- 実際のplanはNeon Project＋独立秘密の4件、専用role・grant等の10件を新規作成する内容で、削除・置き換え0件。
+  そのplanだけをapplyした。plan・state・生ログはGit除外の所有者専用領域へ保存し、秘密はこの記録に含めない。
+- `demo migrate` / `demo seed` / `demo verify-database`成功。
+  direct / poolerのTLS・runtime CRUD・sequence・将来作成する表の権限を実通信で確認した。
+  create table / role / database、owner tableのdropを`insufficient_privilege`で拒否。
+  不正パスワード・暗号化なし・CAなしも拒否され、検証用オブジェクトは回収済み。
+- 新DBのUser・Project・DemoSessionは0件。既存DBもUser 1・Tenant 1・Project 0・DemoSession 0を維持。
+  通常データのmigration・seed・削除、既存Storageへの書き込みは行っていない。
+- 回収CLIに既存Repositoryの`unfinished_count`を使う`remaining`表示を追加。
+  今回の対象0件でも将来の`cleanup_after`を待つ台帳が残るケースを回帰テストで確認した。
+  Backendの関連26件成功（15.21秒、既存警告1件）、ruff / pyright成功。Infra単体24件・ruff / format成功。
+  専用DB上のdry-run / executeも対象0・全残件0を確認。Storageや実データを含む回収の実通信検証とは区別する。
+- Supabase MCPの費用照会は利用不能、既存PATのOrganization読み取り・Project作成は403。
+  Organization一覧が空で、参照できるProjectは既存の1件のみ。権限を推測で拡張したり既存資格情報を変更していない。
+  ブラウザも別のChrome拡張機能画面が開いているため操作を停止した。
+  DBパスワード設定・作成はブラウザ操作ルールに従いユーザーへ引き継ぎ、資源作成待ちとした。
+
+残りはSupabaseの専用Project・private bucket・専用S3キーの用意と実通信検証。
+新規Projectは既存Organization `shima-hei`、名前`syncnesto-demo`、RegionはSingapore、Free枠内で作成する。
+パスワードやS3キーはチャットへ送らず、所有者専用のローカル設定へ保存する。
 その後にruntime入力元・CI・公開用秘密を切り替える変更へ進む。push・公開切り替えは引き続き保留する。
 
 ## 通常データの30日保持後の定期回収
