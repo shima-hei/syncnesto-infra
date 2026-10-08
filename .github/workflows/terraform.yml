@@ -68,5 +68,9 @@ jobs:
           terraform_wrapper: false
       - name: Use reviewed production settings
         run: cp terraform/vercel/production.tfvars.example terraform/vercel/production.auto.tfvars
+      - uses: astral-sh/setup-uv@94527f2e458b27549849d47d273a16bec83a01e9 # v7
+        with:
+          version: 0.10.11
+      - run: uv sync --frozen --no-dev
       - name: Plan or apply existing production infrastructure
-        run: python3 -m scripts.deploy ci "$OPERATION"
+        run: uv run --frozen --no-dev python -m scripts.deploy ci "$OPERATION"
