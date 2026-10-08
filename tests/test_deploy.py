@@ -227,7 +227,7 @@ class TerraformTests(unittest.TestCase):
 
 
 class CIGuardTests(unittest.TestCase):
-    def run_ci(self, *, empty=False, destructive=False):
+    def run_ci(self, *, empty=False, destructive=False, demo=False, empty_demo=False):
         env = {
             "PG_CONN_STR": "postgres://syncnesto_tfstate:fixture@ep-example.neon.tech/syncnesto_terraform?sslmode=verify-full",
             "VERCEL_API_TOKEN": "fixture",
@@ -235,10 +235,15 @@ class CIGuardTests(unittest.TestCase):
             "SUPABASE_S3_ACCESS_KEY_ID": "fixture",
             "SUPABASE_S3_SECRET_ACCESS_KEY": "fixture",
         }
+        if demo:
+            env["TF_VAR_demo_runtime_enabled"] = "true"
 
         def execute(args, *, env):
             if "pull" in args:
-                return json.dumps({"resources": [] if empty else [{"type": "fixture"}]})
+                missing = empty or (empty_demo and "/terraform/demo" in args[1])
+                return json.dumps(
+                    {"resources": [] if missing else [{"type": "fixture"}]}
+                )
             if "show" in args:
                 return json.dumps(
                     {
@@ -263,7 +268,7 @@ class CIGuardTests(unittest.TestCase):
             patch.dict(os.environ, {}, clear=True),
             contextlib.redirect_stdout(io.StringIO()),
         ):
-            if empty or destructive:
+            if empty or destructive or empty_demo:
                 with self.assertRaises(RuntimeError):
                     ci.main()
                 self.assertFalse(
@@ -273,6 +278,10 @@ class CIGuardTests(unittest.TestCase):
                 self.assertEqual(ci.main(), 0)
                 self.assertEqual(
                     sum("apply" in item.args[0] for item in call.call_args_list), 3
+                )
+                self.assertEqual(
+                    sum("init" in item.args[0] for item in call.call_args_list),
+                    5 if demo else 3,
                 )
 
     def test_actions_rejects_non_main_before_reading_secrets(self):
@@ -297,6 +306,12 @@ class CIGuardTests(unittest.TestCase):
 
     def test_existing_non_destructive_state_applies_all_three_stacks(self):
         self.run_ci()
+
+    def test_demo_runtime_initializes_existing_demo_states_without_applying_them(self):
+        self.run_ci(demo=True)
+
+    def test_missing_demo_state_refuses_all_production_apply(self):
+        self.run_ci(demo=True, empty_demo=True)
 
 
 if __name__ == "__main__":

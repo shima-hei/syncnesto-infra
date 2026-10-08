@@ -6,7 +6,7 @@ import subprocess
 import sys
 from urllib.parse import parse_qs, urlsplit
 
-from .environment import STACKS, terraform_environment
+from .environment import DEMO_STACKS, STACKS, terraform_environment
 
 
 def execute(args: list[str], *, env: dict[str, str]) -> str:
@@ -48,6 +48,16 @@ def main() -> int:
         or parse_qs(parsed.query).get("sslmode") != ["verify-full"]
     ):
         raise RuntimeError("Expected verified direct connection to the state database")
+    if env.get("TF_VAR_demo_runtime_enabled", "false").lower() == "true":
+        # runtimeのoutput参照に必要。既存デモ資源のplan/applyは実行しない。
+        for stack, directory in DEMO_STACKS.items():
+            terraform = ["terraform", f"-chdir={directory}"]
+            execute([*terraform, "init", "-input=false", "-lockfile=readonly"], env=env)
+            state = json.loads(execute([*terraform, "state", "pull"], env=env))
+            if not state.get("resources"):
+                raise RuntimeError(
+                    f"Existing {stack} state is required for demo runtime"
+                )
     for stack, directory in STACKS.items():
         terraform = ["terraform", f"-chdir={directory}"]
         execute([*terraform, "init", "-input=false", "-lockfile=readonly"], env=env)
