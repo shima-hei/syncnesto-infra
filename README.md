@@ -329,7 +329,8 @@ migration・seedなどの運用コマンドは`DEMO_MODE=false`を明示し、�
 ### デモ専用資源の分離準備（2026-10-08）
 
 状態: 配置案・追加費用0 USD/月の条件はユーザー承認済み。専用Neonの作成・初期化・実通信検証を完了。
-Supabaseは現在のAPIトークンの作成権限不足により、ユーザーによるProject作成待ち。
+Supabaseの専用Projectはユーザーが作成済み。非公開・5MiB上限の専用バケットも作成・確認済み。
+専用S3キーとデモProject限定の準備用管理トークンは発行直前の確認待ち。
 新規Neon用の2構成だけをapply済み。Vercelの環境変数変更・デプロイは未実施。
 ユーザー指示に従いローカルコミットまでとし、pushは保留する。
 `APP_ENV=production` / `DEMO_MODE=true` の方針は変更しない。
@@ -475,14 +476,19 @@ uv run python -m scripts.deploy demo verify-database
 運用用Backend subprocessは`APP_ENV=production` / `DEMO_MODE=false` / メール無効で動かし、
 Terraform state・クラウド管理トークンを子プロセスへ渡さない。
 
-Storage Projectを費用確認後に作成し、専用S3キーを`.env.demo.local`またはexportした環境変数へ設定する。
+Storageの専用S3キーを`.env.demo.local`またはexportした環境変数へ設定する。
 ファイルを使う場合は`.env.demo.local.example`を参考にし、所有者専用の`chmod 600`を必須とする。
+既存PATが専用Projectにアクセスできない場合は、既存の権限を変更せず
+`DEMO_SUPABASE_ACCESS_TOKEN`に専用のscoped PATを設定する。
+対象はデモProjectだけ、準備時は7日間、Project Settings / API Keys / API Key SecretsをそれぞれReadにする。
+空の場合のみexport済み`SUPABASE_ACCESS_TOKEN`を使用する。管理トークンはBackend subprocessに渡さない。
+根拠: [Supabase Personal Access Tokens](https://supabase.com/docs/guides/platform/personal-access-tokens)。
 通常のS3キーへのfallbackをせず、通常Project refや通常キーの再利用を拒否する。
 prepare/verify前には管理APIで承認済みOrganization・Project名・region・稼働状態を確認し、
 指定S3 endpointでキーが認証できることを読み取りで確認する。
 
 ```sh
-# SUPABASE_ACCESS_TOKENは管理APIでの所属確認用に環境へexportする。
+# .env.demo.localへ専用S3キーとDEMO_SUPABASE_ACCESS_TOKENを設定する。
 uv run python -m scripts.deploy demo storage prepare
 uv run python -m scripts.deploy demo storage verify
 
@@ -534,7 +540,8 @@ Vercelの接続先・CI入力・公開用秘密の切り替えは、この準備
 | RBAC | Role 8・Permission 38。通常ログイン用の初期管理者を作成していない |
 | DBユーザー | migration owner `syncnesto_owner`、runtime `syncnesto_app`。専用の新規パスワード |
 | 新state | `demo_resources_state` / `demo_database_state`、運用側の既存state DB内に新設 |
-| Supabase | Project未作成。既存Project用トークンでは作成を403で拒否され、作成画面をユーザーへ引き継いだ |
+| Supabase | ユーザー作成の`jxtwcdmaooiasodubofu` / `syncnesto-demo`、`shima-hei`、`ap-southeast-1`、`ACTIVE_HEALTHY` |
+| Storage | `syncnesto-demo`、private、上限5,242,880 bytes、オブジェクト0件。S3キー発行・実通信検証は未完了 |
 | 公開状態 | 既存Vercelの接続先・秘密・環境変数・deploymentを維持。デモは未有効化 |
 
 Neon Providerの`suspend_timeout_seconds=0`はglobal default（5分）を意味する。
@@ -560,8 +567,25 @@ Freeでは停止時間の明示指定を避け、既存構成と同じ既定値�
   ブラウザも別のChrome拡張機能画面が開いているため操作を停止した。
   DBパスワード設定・作成はブラウザ操作ルールに従いユーザーへ引き継ぎ、資源作成待ちとした。
 
-残りはSupabaseの専用Project・private bucket・専用S3キーの用意と実通信検証。
-新規Projectは既存Organization `shima-hei`、名前`syncnesto-demo`、RegionはSingapore、Free枠内で作成する。
+#### Supabase Project作成後の確認・準備（2026-10-08）
+
+- ユーザーの「作ったよ」を受け、MCPで専用ProjectのID・Organization・名前・Singapore・正常稼働を確認。
+  Organization詳細も`plan=free`。既存のshell PATから参照できるProjectは引き続き既存1件のみで、
+  MCP接続の権限とshell PATの権限を混同しない。
+- 専用Project内にprivate bucket `syncnesto-demo`をDashboardから作成。
+  Storageメタデータの読み取りで`public=false`、`file_size_limit=5242880`、オブジェクト0件を確認。
+  Data API画面の`Enable Data API`もfalse。テーブル自動公開・自動RLSの個別設定は今回未確認。
+- S3キー`syncnesto-demo-backend`と、専用Projectのみ・7日間・上記3項目のRead権限を持つ
+  scoped PAT `syncnesto-demo-storage-setup`の確認画面を準備。永続的アクセスを作るブラウザ操作のため
+  発行・所有者専用ローカル保存の実行直前確認をユーザーへ依頼した。まだ発行していない。
+- Infraの準備コマンドに`DEMO_SUPABASE_ACCESS_TOKEN`の明示指定を追加。
+  Project所属確認とbucket設定に同じ専用PATを使い、既存PATや通常S3キーの権限を変更しない。
+  Python単体26件・ruff / format / `git diff --check`成功。管理トークンの子プロセス除外、専用PATの優先、認証情報なしで通信しないことを確認。
+  Terraform・API契約・DBモデル・Frontendは変更していない。
+- `.env.demo.local`は専用Project refと空のキー欄だけで作成。Git対象外・権限600を確認した。
+  既存Storageはprivate / 20MiB上限 / 2オブジェクト / 1,104,355 bytesを維持していることを読み取りで確認。
+
+残りは専用S3キー・準備用管理トークンの発行、default avatar配置、Storageと回収の実通信検証。
 パスワードやS3キーはチャットへ送らず、所有者専用のローカル設定へ保存する。
 その後にruntime入力元・CI・公開用秘密を切り替える変更へ進む。push・公開切り替えは引き続き保留する。
 

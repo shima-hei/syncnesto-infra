@@ -52,9 +52,11 @@ def request(url: str, *, method: str = "GET", headers=None, body=None):
         return error.code, error.headers, error.read()
 
 
-def storage_headers(target: StorageTarget = PORTFOLIO) -> dict[str, str]:
+def storage_headers(
+    target: StorageTarget = PORTFOLIO, *, management_token: str | None = None
+) -> dict[str, str]:
     """管理APIからservice_roleを一時的に読み、バケット操作だけに使用する。"""
-    token = os.environ["SUPABASE_ACCESS_TOKEN"]
+    token = management_token or os.environ["SUPABASE_ACCESS_TOKEN"]
     status, _, body = request(
         f"https://api.supabase.com/v1/projects/{target.project}/api-keys?reveal=true",
         headers={"Authorization": "Bearer " + token},
@@ -93,9 +95,11 @@ def s3_client(
     )
 
 
-def prepare(s3, target: StorageTarget = PORTFOLIO) -> None:
+def prepare(
+    s3, target: StorageTarget = PORTFOLIO, *, management_token: str | None = None
+) -> None:
     """指定先の非公開バケットとサイズ上限を冪等に用意する。"""
-    headers = storage_headers(target)
+    headers = storage_headers(target, management_token=management_token)
     base = f"https://{target.project}.supabase.co/storage/v1/bucket"
     status, _, _ = request(f"{base}/{target.bucket}", headers=headers)
     if status not in (200, 400, 404):

@@ -120,6 +120,7 @@ class DemoDatabaseTests(unittest.TestCase):
             "AWS_ACCESS_KEY_ID": "demo-key-fixture",
             "PG_CONN_STR": "state-fixture",
             "SUPABASE_ACCESS_TOKEN": "management-fixture",
+            "DEMO_SUPABASE_ACCESS_TOKEN": "demo-management-fixture",
             "NEON_API_KEY": "neon-fixture",
             "DEMO_SUPABASE_S3_SECRET_ACCESS_KEY": "duplicate-fixture",
         }
@@ -187,7 +188,10 @@ class DemoStorageTests(unittest.TestCase):
             patch.object(demo, "ROOT", Path(directory)),
         ):
             file = Path(directory) / ".env.demo.local"
-            file.write_text("DEMO_SUPABASE_PROJECT_REF='" + "b" * 20 + "'\n")
+            file.write_text(
+                "DEMO_SUPABASE_PROJECT_REF='" + "b" * 20 + "'\n"
+                "DEMO_SUPABASE_ACCESS_TOKEN=demo-management-fixture\n"
+            )
             file.chmod(0o644)
             with self.assertRaises(RuntimeError):
                 demo.storage_environment(self.credentials())
@@ -196,6 +200,64 @@ class DemoStorageTests(unittest.TestCase):
                 demo.storage_environment(self.credentials())[demo.STORAGE_KEYS[0]],
                 "a" * 20,
             )
+            self.assertEqual(
+                demo.management_token(demo.storage_environment(self.credentials())),
+                "demo-management-fixture",
+            )
+
+    def test_dedicated_management_token_is_used_for_both_project_and_bucket(self):
+        env = self.credentials() | {
+            "SUPABASE_ACCESS_TOKEN": "portfolio-management-fixture",
+            "DEMO_SUPABASE_ACCESS_TOKEN": "demo-management-fixture",
+        }
+        target = demo.storage_target(env)
+        metadata = {
+            "id": target.project,
+            "organization_id": demo.SUPABASE_ORGANIZATION,
+            "name": "syncnesto-demo",
+            "region": target.region,
+            "status": "ACTIVE_HEALTHY",
+        }
+        with (
+            patch.object(
+                storage,
+                "request",
+                return_value=(200, {}, json.dumps(metadata).encode()),
+            ) as request,
+            patch.object(storage, "s3_client") as client,
+        ):
+            demo.verify_storage(env, target)
+            self.assertEqual(
+                request.call_args.kwargs["headers"]["Authorization"],
+                "Bearer demo-management-fixture",
+            )
+            client.return_value.list_buckets.assert_called_once()
+        with (
+            patch.dict(os.environ, env, clear=True),
+            patch.object(
+                storage,
+                "request",
+                return_value=(
+                    200,
+                    {},
+                    b'[{"name":"service_role","api_key":"fixture-service-role"}]',
+                ),
+            ) as request,
+        ):
+            storage.storage_headers(target, management_token=demo.management_token(env))
+            self.assertEqual(
+                request.call_args.kwargs["headers"]["Authorization"],
+                "Bearer demo-management-fixture",
+            )
+            self.assertIn(target.project, request.call_args.args[0])
+
+    def test_management_token_is_required_before_network_access(self):
+        with patch.object(storage, "request") as request:
+            with self.assertRaises(RuntimeError):
+                demo.verify_storage(
+                    self.credentials(), demo.storage_target(self.credentials())
+                )
+            request.assert_not_called()
 
     def test_storage_project_must_belong_to_approved_organization(self):
         env = self.credentials() | {"SUPABASE_ACCESS_TOKEN": "management-fixture"}

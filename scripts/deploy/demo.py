@@ -26,6 +26,7 @@ STORAGE_KEYS = (
     "DEMO_SUPABASE_S3_ACCESS_KEY_ID",
     "DEMO_SUPABASE_S3_SECRET_ACCESS_KEY",
 )
+MANAGEMENT_TOKEN = "DEMO_SUPABASE_ACCESS_TOKEN"
 
 
 def demo_outputs(env: dict[str, str]) -> dict:
@@ -67,7 +68,7 @@ def storage_environment(env: dict[str, str]) -> dict[str, str]:
         if stat.S_IMODE(path.stat().st_mode) & 0o077:
             raise RuntimeError("Demo credential file must be owner-only (chmod 600)")
         values = dotenv_values(path)
-        if set(values) - set(STORAGE_KEYS):
+        if set(values) - {*STORAGE_KEYS, MANAGEMENT_TOKEN}:
             raise RuntimeError("Unexpected setting in demo credential file")
         for key, value in values.items():
             if value is not None:
@@ -85,6 +86,14 @@ def storage_environment(env: dict[str, str]) -> dict[str, str]:
         if result.get(original_key) == result[demo_key]:
             raise RuntimeError("Demo must not reuse the portfolio storage credentials")
     return result
+
+
+def management_token(env: dict[str, str]) -> str:
+    """専用のscoped PATを優先し、既存トークンを変更せずに準備する。"""
+    token = env.get(MANAGEMENT_TOKEN) or env.get("SUPABASE_ACCESS_TOKEN")
+    if not token:
+        raise RuntimeError("Set a management token scoped to the demo project")
+    return token
 
 
 def storage_target(env: dict[str, str]) -> storage.StorageTarget:
@@ -212,7 +221,7 @@ def verify_storage(env: dict[str, str], target: storage.StorageTarget):
     """管理情報とS3認証を読み取りで確認し、書込前にProjectの所属を確定する。"""
     status, _, body = storage.request(
         f"https://api.supabase.com/v1/projects/{target.project}",
-        headers={"Authorization": "Bearer " + env["SUPABASE_ACCESS_TOKEN"]},
+        headers={"Authorization": "Bearer " + management_token(env)},
     )
     if status != 200:
         raise RuntimeError("Cannot verify the demo storage project organization")
@@ -250,9 +259,10 @@ def main() -> int:
             env = storage_environment(state_environment())
             target = storage_target(env)
             client = verify_storage(env, target)
-            (storage.prepare if args.operation == "prepare" else storage.verify)(
-                client, target
-            )
+            if args.operation == "prepare":
+                storage.prepare(client, target, management_token=management_token(env))
+            else:
+                storage.verify(client, target)
             return 0
         env = backend_environment(with_storage=args.command == "cleanup")
         if args.command == "migrate":
