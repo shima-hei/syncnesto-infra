@@ -303,3 +303,12 @@ uv run python -m scripts.deploy verify-web --skip-upload
 APIは共有BFFキーを必須にし、公開ドキュメントを閉じ、本番Cookie・Host・TLS設定を起動時に検証します。
 ログイン10回/分・通常240回/分・全体6000回/分の制限をDBで共有します。
 Neon Freeでは接続試行自体のIP遮断はできません。TLS・認証・権限分離で保護し、攻撃を完全に遮断する保証はありません。
+## ポートフォリオ用デモへの切り替え
+
+`terraform/vercel`の`app_env`は既定`production`で、デモは自動で有効にしない。
+専用DB・制限付きruntime role・専用非公開バケットを準備し、`runtime`の接続先を設定した後、
+`app_env = "demo"`と`demo_data_isolated = true`を設定する。
+このフラグは実際のバケット・DB分離の検査や資源作成を行わないため、設定確認を省略しない。
+FrontendとBackendのAPP_ENVを合わせ、Backendのメールを無効にし、BFFとは別のCRON_SECRETを使う。
+Backend CIは取得したAPP_ENVに応じて日次Cron設定を追加する。
+通常環境にはCronを登録しない。ローカル検証はmock planを使用し、cloud applyは別のリリース作業とする。
