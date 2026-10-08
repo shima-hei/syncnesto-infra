@@ -651,6 +651,8 @@ Backendのデプロイ設定生成は、受付停止後も専用接続が設定�
 公開反映時に`DEMO_RUNTIME_ENABLED=true`の新規CI runnerで、デモ用stateの初期化不足によるplan失敗を確認した。
 専用runtimeを有効にする場合は、既存デモ2stateを先にinit・読み取り検証する。
 通常CIのplan/apply対象は従来の3構成のままとし、デモ資源の自動作成・applyは追加しない。
+Production jobも固定lockのPython実行依存を用意し、uv経由で実行する。
+checks jobの依存は別runnerへ引き継がれないため、dotenv等を使う専用設定の読み取りにもこの準備が必要。
 
 ## 通常データの30日保持後の定期回収
 
