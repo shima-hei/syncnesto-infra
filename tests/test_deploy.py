@@ -85,6 +85,33 @@ class EnvironmentTests(unittest.TestCase):
                 with self.assertRaises(RuntimeError):
                     environment.backend_environment()
 
+    def test_backend_operations_do_not_inherit_development_mail_settings(self):
+        with (
+            patch.object(
+                environment,
+                "state_environment",
+                return_value={
+                    "PGSSLROOTCERT": "ca",
+                    "EMAIL_PROVIDER": "smtp",
+                    "FRONTEND_PUBLIC_URL": "http://localhost:3000",
+                },
+            ),
+            patch.object(
+                environment,
+                "terraform_outputs",
+                return_value={
+                    "migration_database_url": "postgresql://syncnesto_owner:fixture@ep-example.neon.tech/syncnesto?sslmode=verify-full",
+                    "frontend_url": "https://syncnesto.vercel.app",
+                    "backend_jwt_secret": "jwt-fixture",
+                    "backend_bff_secret": "bff-fixture",
+                },
+            ),
+        ):
+            result = environment.backend_environment()
+        self.assertEqual(result["EMAIL_PROVIDER"], "disabled")
+        self.assertEqual(result["FRONTEND_PUBLIC_URL"], "https://syncnesto.vercel.app")
+        self.assertEqual(result["APP_ENV"], "production")
+
 
 class TerraformTests(unittest.TestCase):
     def test_runtime_credentials_are_forwarded_as_environment_only(self):

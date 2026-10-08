@@ -104,6 +104,8 @@ def backend_environment() -> dict[str, str]:
         {
             "DATABASE_URL": uri,
             "APP_ENV": "production",
+            "EMAIL_PROVIDER": "disabled",
+            "FRONTEND_PUBLIC_URL": outputs["frontend_url"],
             "SECRET_KEY": outputs["backend_jwt_secret"],
             "BFF_SHARED_SECRET": outputs["backend_bff_secret"],
             "ALLOWED_HOSTS": urlsplit(BACKEND_ORIGIN).hostname,
