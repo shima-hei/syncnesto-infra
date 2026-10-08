@@ -648,6 +648,10 @@ Backendのデプロイ設定生成は、受付停止後も専用接続が設定�
 この修正のローカル検証はPython単体28件、ruff / format、6構成のTerraform validate・mock test計22件が成功。
 クラウドstateへの接続・apply・公開設定変更は行っていない。
 
+公開反映時に`DEMO_RUNTIME_ENABLED=true`の新規CI runnerで、デモ用stateの初期化不足によるplan失敗を確認した。
+専用runtimeを有効にする場合は、既存デモ2stateを先にinit・読み取り検証する。
+通常CIのplan/apply対象は従来の3構成のままとし、デモ資源の自動作成・applyは追加しない。
+
 ## 通常データの30日保持後の定期回収
 
 `terraform/vercel` の `deleted_data_cleanup_mode` は既定 `disabled`。
