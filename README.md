@@ -330,7 +330,8 @@ migration・seedなどの運用コマンドは`DEMO_MODE=false`を明示し、�
 
 状態: 配置案・追加費用0 USD/月の条件はユーザー承認済み。専用Neonの作成・初期化・実通信検証を完了。
 Supabaseの専用Projectはユーザーが作成済み。非公開・5MiB上限の専用バケットも作成・確認済み。
-専用S3キーとデモProject限定の準備用管理トークンは発行直前の確認待ち。
+専用S3キーとデモProject限定の準備用管理トークンはユーザー承認後に発行・ローカル保存済み。
+署名付きStorage通信・容量制限・遅延PUT・期限切れセッションの回収を専用資源で検証済み。
 新規Neon用の2構成だけをapply済み。Vercelの環境変数変更・デプロイは未実施。
 ユーザー指示に従いローカルコミットまでとし、pushは保留する。
 `APP_ENV=production` / `DEMO_MODE=true` の方針は変更しない。
@@ -541,7 +542,7 @@ Vercelの接続先・CI入力・公開用秘密の切り替えは、この準備
 | DBユーザー | migration owner `syncnesto_owner`、runtime `syncnesto_app`。専用の新規パスワード |
 | 新state | `demo_resources_state` / `demo_database_state`、運用側の既存state DB内に新設 |
 | Supabase | ユーザー作成の`jxtwcdmaooiasodubofu` / `syncnesto-demo`、`shima-hei`、`ap-southeast-1`、`ACTIVE_HEALTHY` |
-| Storage | `syncnesto-demo`、private、上限5,242,880 bytes、オブジェクト0件。S3キー発行・実通信検証は未完了 |
+| Storage | `syncnesto-demo`、private、上限5,242,880 bytes。専用S3キー発行済み、静的default avatar配置・署名通信確認済み |
 | 公開状態 | 既存Vercelの接続先・秘密・環境変数・deploymentを維持。デモは未有効化 |
 
 Neon Providerの`suspend_timeout_seconds=0`はglobal default（5分）を意味する。
@@ -585,7 +586,35 @@ Freeでは停止時間の明示指定を避け、既存構成と同じ既定値�
 - `.env.demo.local`は専用Project refと空のキー欄だけで作成。Git対象外・権限600を確認した。
   既存Storageはprivate / 20MiB上限 / 2オブジェクト / 1,104,355 bytesを維持していることを読み取りで確認。
 
-残りは専用S3キー・準備用管理トークンの発行、default avatar配置、Storageと回収の実通信検証。
+#### 専用Storage資格情報と実通信検証（2026-10-08）
+
+- ユーザーの実行直前承認後、専用S3キーと7日間のscoped PATを発行。
+  PATはデモProjectだけを対象にProject Settings / API Keys / API Key SecretsをReadとした。
+  `.env.demo.local`へ直接保存し、Git対象外・権限600を確認。既存PAT・既存S3キーは変更していない。
+- 初回の未使用S3キーの値が確認用ツール出力へ出たため、アプリへ設定せずに差し替えた。
+  ユーザーに失効の実行直前確認を取り、初回キーの失効と一覧からの消失を確認してから
+  同一権限で再発行した。現在のキーは出力せずローカル設定へ直接保存し、一覧はこのキー1件だけ。
+  チャットの初回キーは失効済みで、現在の値をこの記録・コミットには含めない。
+- `demo storage prepare`成功。承認したProject所属と専用S3認証を確認してprivate / 5MiBを設定し、
+  リポジトリの静的`default-avatar.png`だけを配置した。
+- `demo storage verify`成功。署名PUT / GET、SDK read、ブラウザ向けCORS preflight、
+  匿名GET・public URL・不正署名の拒否を実通信で確認し、検証オブジェクトを回収した。
+- 5MiB+1 byteの署名PUTはHTTP 413で拒否。最初の確認コードはS3エラーコード文字列を取得できず失敗したが、
+  HTTPステータスを直接確認する再検証で413と回収後のdefault avatar 1件を確認した。設定は変更していない。
+- 専用DBの制限付きruntime role / poolerと本物のS3を使う2セッションの検証が成功。
+  Vercelの公開設定は変更せず、検証subprocess内だけ`DEMO_MODE=true`・PUT TTL 45秒とした。
+  ログアウト時の業務データ削除・別セッション維持・遅延署名PUTの再出現を確認した。
+  実際のPUT TTLと60秒の回収猶予を経過させ、期限後のPUT拒否と再出現ファイルの最終回収も確認。
+  `DEMO_MODE=false`でdry-runからexecuteへ進み、他の利用中セッションを維持したまま回収できた。
+- 2つ目のセッションはDBの`expires_at`を検証用に過去へ調整し、既存`bind`の期限切れ拒否・失効・回収を確認した。
+  通常の15分無操作を実時間で待った検証ではない。最後にUser / Project / DemoUpload / 未回収台帳0件、
+  元のTenant 1件、`cleaned`台帳2件、Storageはdefault avatar 1件のみとなった。
+  完了台帳は再試行管理のため既存の保持・prune方針を維持し、検証の都合で消していない。
+- 実通信検証はBackendの既存Serviceと専用PostgreSQL / S3を対象とした。
+  Vercel上のCookie / BFF / 画面を通す確認は公開切り替え後に行う。
+  検証用スクリプトとログはGit対象外・権限600の`state-backups/`に保存。
+
+残りはruntime入力元・CI・公開用秘密の切り替え準備と、公開切り替え後のVercel全体フロー確認。
 パスワードやS3キーはチャットへ送らず、所有者専用のローカル設定へ保存する。
 その後にruntime入力元・CI・公開用秘密を切り替える変更へ進む。push・公開切り替えは引き続き保留する。
 
