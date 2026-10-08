@@ -311,4 +311,18 @@ Neon Freeでは接続試行自体のIP遮断はできません。TLS・認証・
 このフラグは実際のバケット・DB分離の検査や資源作成を行わないため、設定確認を省略しない。
 FrontendとBackendのAPP_ENVを合わせ、Backendのメールを無効にし、BFFとは別のCRON_SECRETを使う。
 Backend CIは取得したAPP_ENVに応じて日次Cron設定を追加する。
-通常環境にはCronを登録しない。ローカル検証はmock planを使用し、cloud applyは別のリリース作業とする。
+通常環境のCronは既定で登録しない。ローカル検証はmock planを使用し、cloud applyは別のリリース作業とする。
+
+## 通常データの30日保持後の定期回収
+
+`terraform/vercel` の `deleted_data_cleanup_mode` は既定 `disabled`。
+通常環境だけで `deleted_data_cleanup_tenant_ids` を明示し、まず `dry_run` で対象確認する。
+候補・監査結果を確認後に `execute` へ変更する。Demoとの併用と対象未指定をplan時に拒否する。
+既存のBackend専用 `CRON_SECRET` を使い、Frontendには回収設定・秘密を渡さない。
+
+Backendのデプロイ設定生成がmodeに応じて `/internal/trash/cleanup` の日次Cronを登録する。
+保持期間はBackendの既定30日、全組織合計の上限20資源・時間予算20秒。
+上限は `deleted_data_cleanup_limit`（1〜100）、予算は `deleted_data_cleanup_budget_seconds`（1〜40）で指定する。
+時間予算は実行中の処理を中断する厳密な期限ではない。残件は次回または既存の手動CLIで回収する。
+設定・失敗時の再試行・結果確認は [Backendの運用手順](../syncnesto-backend/docs/deleted-data-cleanup.md) を参照。
+この変更ではcloud apply・Productionの回収モード有効化・実データ削除を行わない。

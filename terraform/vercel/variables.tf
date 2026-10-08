@@ -97,3 +97,43 @@ variable "demo_data_isolated" {
   type        = bool
   default     = false
 }
+
+variable "deleted_data_cleanup_mode" {
+  description = "Normal data cleanup: disabled by default; review dry_run before execute."
+  type        = string
+  default     = "disabled"
+  validation {
+    condition     = contains(["disabled", "dry_run", "execute"], var.deleted_data_cleanup_mode)
+    error_message = "Use disabled, dry_run or execute."
+  }
+}
+
+variable "deleted_data_cleanup_tenant_ids" {
+  description = "Explicit normal tenant IDs permitted for scheduled cleanup."
+  type        = list(number)
+  default     = []
+  validation {
+    condition     = length(var.deleted_data_cleanup_tenant_ids) <= 20 && alltrue([for id in var.deleted_data_cleanup_tenant_ids : id >= 1 && id <= 2147483647 && id == floor(id)])
+    error_message = "Set at most 20 positive integer tenant IDs."
+  }
+}
+
+variable "deleted_data_cleanup_limit" {
+  description = "Maximum root resources inspected or purged in one scheduled invocation."
+  type        = number
+  default     = 20
+  validation {
+    condition     = var.deleted_data_cleanup_limit >= 1 && var.deleted_data_cleanup_limit <= 100 && var.deleted_data_cleanup_limit == floor(var.deleted_data_cleanup_limit)
+    error_message = "Set an integer from 1 to 100."
+  }
+}
+
+variable "deleted_data_cleanup_budget_seconds" {
+  description = "Soft time budget; in-flight storage and DB calls may complete after it."
+  type        = number
+  default     = 20
+  validation {
+    condition     = var.deleted_data_cleanup_budget_seconds >= 1 && var.deleted_data_cleanup_budget_seconds <= 40 && var.deleted_data_cleanup_budget_seconds == floor(var.deleted_data_cleanup_budget_seconds)
+    error_message = "Set an integer from 1 to 40."
+  }
+}

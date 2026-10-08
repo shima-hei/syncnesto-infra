@@ -21,6 +21,10 @@ run "bootstrap_without_backend" {
     condition     = vercel_project.backend.framework == "fastapi" && vercel_project.backend.git_repository == null && vercel_project.backend.resource_config.fluid && vercel_project.backend.resource_config.function_default_timeout == 60
     error_message = "FastAPI bootstrap must remain disconnected with Fluid Compute and a bounded timeout."
   }
+  assert {
+    condition     = nonsensitive(vercel_project_environment_variable.backend_public["DELETED_DATA_CLEANUP_MODE"].value) == "disabled" && nonsensitive(vercel_project_environment_variable.backend_public["DELETED_DATA_CLEANUP_TENANT_IDS"].value) == ""
+    error_message = "Normal data cleanup must remain disabled until tenant IDs are explicitly reviewed."
+  }
 }
 
 run "connect_ready_backend" {
@@ -93,4 +97,47 @@ run "explicit_isolated_demo" {
     condition     = vercel_project_environment_variable.demo_cron_secret.sensitive && vercel_project_environment_variable.demo_cron_secret.key == "CRON_SECRET"
     error_message = "Cleanup credentials must only be installed as a backend secret."
   }
+}
+
+run "explicit_normal_cleanup_dry_run" {
+  command = plan
+  variables {
+    deleted_data_cleanup_mode       = "dry_run"
+    deleted_data_cleanup_tenant_ids = [1, 7]
+  }
+  assert {
+    condition     = nonsensitive(vercel_project_environment_variable.backend_public["DELETED_DATA_CLEANUP_MODE"].value) == "dry_run" && nonsensitive(vercel_project_environment_variable.backend_public["DELETED_DATA_CLEANUP_TENANT_IDS"].value) == "1,7"
+    error_message = "The backend must receive only the explicitly selected normal tenants."
+  }
+  assert {
+    condition     = !contains(keys(vercel_project_environment_variable.frontend), "DELETED_DATA_CLEANUP_MODE") && !contains(keys(vercel_project_environment_variable.frontend), "CRON_SECRET")
+    error_message = "Cleanup authorization and settings must stay backend-only."
+  }
+}
+
+run "reject_cleanup_without_tenants" {
+  command = plan
+  variables {
+    deleted_data_cleanup_mode = "execute"
+  }
+  expect_failures = [vercel_project.backend]
+}
+
+run "reject_cleanup_in_demo" {
+  command = plan
+  variables {
+    app_env                         = "demo"
+    demo_data_isolated              = true
+    deleted_data_cleanup_mode       = "execute"
+    deleted_data_cleanup_tenant_ids = [1]
+  }
+  expect_failures = [vercel_project.backend]
+}
+
+run "reject_invalid_cleanup_tenant_id" {
+  command = plan
+  variables {
+    deleted_data_cleanup_tenant_ids = [0]
+  }
+  expect_failures = [var.deleted_data_cleanup_tenant_ids]
 }
