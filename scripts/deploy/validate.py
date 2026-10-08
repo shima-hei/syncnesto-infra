@@ -6,7 +6,7 @@ import subprocess
 import tempfile
 from pathlib import Path
 
-from .environment import ROOT, STACKS
+from .environment import ALL_STACKS, ROOT
 
 
 def main() -> int:
@@ -14,13 +14,15 @@ def main() -> int:
     env = {
         key: value
         for key, value in os.environ.items()
-        if not key.startswith(("TF_VAR_", "PG_", "VERCEL_", "NEON_", "SUPABASE_"))
+        if not key.startswith(
+            ("TF_VAR_", "PG_", "VERCEL_", "NEON_", "SUPABASE_", "DEMO_SUPABASE_")
+        )
         and key not in {"TF_DATA_DIR", "TF_WORKSPACE"}
     }
     with tempfile.TemporaryDirectory(prefix="syncnesto-terraform-check-") as directory:
         for name, source in {
             "localstack": ROOT / "terraform/localstack",
-            **STACKS,
+            **ALL_STACKS,
         }.items():
             target = Path(directory) / name
             target.mkdir()

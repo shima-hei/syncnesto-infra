@@ -35,3 +35,26 @@ run "reject_owner_database_uri" {
 
   expect_failures = [var.database_url]
 }
+
+run "demo_connections_are_additive" {
+  command = plan
+  variables {
+    demo_runtime_enabled    = true
+    demo_database_url       = "postgresql://syncnesto_app:test@demo-pooler.example.com/syncnesto?sslmode=verify-full"
+    demo_secret_key         = "test-demo-jwt-key-at-least-32-characters"
+    demo_storage_access_key = "demo-access"
+    demo_storage_secret_key = "demo-secret"
+  }
+  assert {
+    condition     = vercel_project_environment_variable.database.key == "DATABASE_URL" && vercel_project_environment_variable.storage_access_key.key == "AWS_ACCESS_KEY_ID" && local.public_environment.AWS_S3_BUCKET_NAME == "syncnesto-portfolio"
+    error_message = "Normal connection keys and storage target must remain unchanged."
+  }
+  assert {
+    condition     = vercel_project_environment_variable.demo_database[0].key == "DEMO_DATABASE_URL" && vercel_project_environment_variable.demo_jwt[0].key == "DEMO_SECRET_KEY" && local.demo_public_environment.DEMO_AWS_S3_BUCKET_NAME == "syncnesto-demo"
+    error_message = "Demo must use distinct configuration keys and a dedicated bucket."
+  }
+  assert {
+    condition     = vercel_project_environment_variable.demo_database[0].sensitive && vercel_project_environment_variable.demo_jwt[0].sensitive && vercel_project_environment_variable.demo_storage_access_key[0].sensitive && vercel_project_environment_variable.demo_storage_secret_key[0].sensitive
+    error_message = "Demo credentials must remain backend secrets."
+  }
+}

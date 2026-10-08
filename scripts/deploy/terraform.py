@@ -4,25 +4,37 @@ import os
 import subprocess
 import sys
 
-from .environment import STACKS, TOKEN_KEYS, terraform_environment, terraform_outputs
+from .environment import (
+    ALL_STACKS,
+    TOKEN_KEYS,
+    terraform_environment,
+    terraform_outputs,
+)
 
 
 def main() -> int:
     """各stackに必要な資格情報だけを環境変数として渡す。"""
     os.umask(0o077)
     args = sys.argv[1:]
-    stack = args.pop(0) if args and args[0] in STACKS else "vercel"
+    stack = args.pop(0) if args and args[0] in ALL_STACKS else "vercel"
     if not args:
         print(
-            "Usage: python -m scripts.deploy terraform [vercel|neon|runtime] <command> [arguments]",
+            "Usage: python -m scripts.deploy terraform "
+            "[vercel|neon|runtime|demo|demo-neon] <command> [arguments]",
             file=sys.stderr,
         )
         return 2
 
     env = terraform_environment()
     remote_command = args[0] in {"plan", "apply", "import", "refresh", "destroy"}
-    if remote_command and stack != "neon":
-        required = ("VERCEL_API_TOKEN",) if stack == "runtime" else TOKEN_KEYS
+    if remote_command and stack not in {"neon", "demo-neon"}:
+        required = (
+            ("NEON_API_KEY",)
+            if stack == "demo"
+            else ("VERCEL_API_TOKEN",)
+            if stack == "runtime"
+            else TOKEN_KEYS
+        )
         missing = [key for key in required if not env.get(key)]
         if missing:
             print(
@@ -30,10 +42,16 @@ def main() -> int:
             )
             return 2
 
-    if remote_command and stack != "vercel":
+    if remote_command and stack not in {"vercel", "demo"}:
         outputs = terraform_outputs(env=env)
-        if stack == "neon":
+        if stack in {"neon", "demo-neon"}:
             connection = outputs["database_admin_connection"]
+            if stack == "demo-neon":
+                from .demo import demo_outputs
+
+                demo = demo_outputs(env)
+                env["TF_VAR_production_database_host"] = connection["host"]
+                connection = demo["database_admin_connection"]
             for target, source in {
                 "database_host": "host",
                 "pooled_host": "pooled_host",
@@ -60,8 +78,35 @@ def main() -> int:
                     "TF_VAR_storage_secret_key": env[required[1]],
                 }
             )
+            if env.get("TF_VAR_demo_runtime_enabled", "false").lower() == "true":
+                from .demo import (
+                    demo_outputs,
+                    restricted_runtime_uri,
+                    storage_environment,
+                )
 
-    return subprocess.call(["terraform", f"-chdir={STACKS[stack]}", *args], env=env)
+                dedicated = demo_outputs(env)
+                demo_database = terraform_outputs("demo-neon", env=env)
+                env = storage_environment(env)
+                env.update(
+                    {
+                        "TF_VAR_demo_database_url": restricted_runtime_uri(
+                            dedicated, demo_database
+                        ),
+                        "TF_VAR_demo_secret_key": dedicated["backend_jwt_secret"],
+                        "TF_VAR_demo_supabase_project_ref": env[
+                            "DEMO_SUPABASE_PROJECT_REF"
+                        ],
+                        "TF_VAR_demo_storage_access_key": env[
+                            "DEMO_SUPABASE_S3_ACCESS_KEY_ID"
+                        ],
+                        "TF_VAR_demo_storage_secret_key": env[
+                            "DEMO_SUPABASE_S3_SECRET_ACCESS_KEY"
+                        ],
+                    }
+                )
+
+    return subprocess.call(["terraform", f"-chdir={ALL_STACKS[stack]}", *args], env=env)
 
 
 if __name__ == "__main__":

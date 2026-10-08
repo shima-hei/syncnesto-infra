@@ -83,17 +83,23 @@ variable "neon_organization_id" {
   default     = null
 }
 variable "app_env" {
-  description = "Application behavior on the Vercel production target; demo is opt-in."
+  description = "Execution environment on Vercel. Demo behavior is controlled separately by demo_mode."
   type        = string
   default     = "production"
   validation {
-    condition     = contains(["production", "demo"], var.app_env)
-    error_message = "app_env must be production or demo."
+    condition     = var.app_env == "production"
+    error_message = "Vercel requires app_env=production; use demo_mode for demo behavior."
   }
 }
 
+variable "demo_mode" {
+  description = "Enable isolated portfolio demo features while keeping production security."
+  type        = bool
+  default     = false
+}
+
 variable "demo_data_isolated" {
-  description = "Confirm runtime DATABASE_URL and private storage bucket are dedicated to the demo."
+  description = "Confirm DEMO_DATABASE_URL and DEMO_AWS_* use dedicated demo resources while normal connections remain unchanged."
   type        = bool
   default     = false
 }

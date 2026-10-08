@@ -22,6 +22,60 @@ locals {
     FILE_UPLOAD_URL_EXPIRES_SECONDS      = "600"
     AWS_EC2_METADATA_DISABLED            = "true"
   }
+  demo_public_environment = var.demo_runtime_enabled ? {
+    DEMO_AWS_REGION          = "ap-southeast-1"
+    DEMO_AWS_S3_BUCKET_NAME  = "syncnesto-demo"
+    DEMO_AWS_S3_ENDPOINT_URL = "https://${var.demo_supabase_project_ref}.storage.supabase.co/storage/v1/s3"
+  } : {}
+}
+
+resource "vercel_project_environment_variable" "demo_public" {
+  for_each   = local.demo_public_environment
+  project_id = var.backend_project_id
+  key        = each.key
+  value      = each.value
+  target     = ["production"]
+  sensitive  = false
+}
+
+resource "vercel_project_environment_variable" "demo_database" {
+  count            = var.demo_runtime_enabled ? 1 : 0
+  project_id       = var.backend_project_id
+  key              = "DEMO_DATABASE_URL"
+  value_wo         = var.demo_database_url
+  value_wo_version = var.credential_version
+  target           = ["production"]
+  sensitive        = true
+}
+
+resource "vercel_project_environment_variable" "demo_jwt" {
+  count            = var.demo_runtime_enabled ? 1 : 0
+  project_id       = var.backend_project_id
+  key              = "DEMO_SECRET_KEY"
+  value_wo         = var.demo_secret_key
+  value_wo_version = var.credential_version
+  target           = ["production"]
+  sensitive        = true
+}
+
+resource "vercel_project_environment_variable" "demo_storage_access_key" {
+  count            = var.demo_runtime_enabled ? 1 : 0
+  project_id       = var.backend_project_id
+  key              = "DEMO_AWS_ACCESS_KEY_ID"
+  value_wo         = var.demo_storage_access_key
+  value_wo_version = var.credential_version
+  target           = ["production"]
+  sensitive        = true
+}
+
+resource "vercel_project_environment_variable" "demo_storage_secret_key" {
+  count            = var.demo_runtime_enabled ? 1 : 0
+  project_id       = var.backend_project_id
+  key              = "DEMO_AWS_SECRET_ACCESS_KEY"
+  value_wo         = var.demo_storage_secret_key
+  value_wo_version = var.credential_version
+  target           = ["production"]
+  sensitive        = true
 }
 
 resource "vercel_project_environment_variable" "public" {

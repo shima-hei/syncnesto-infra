@@ -51,6 +51,10 @@ jobs:
       NEON_API_KEY: ${{ secrets.NEON_API_KEY }}
       SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.SUPABASE_S3_ACCESS_KEY_ID }}
       SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.SUPABASE_S3_SECRET_ACCESS_KEY }}
+      TF_VAR_demo_runtime_enabled: ${{ vars.DEMO_RUNTIME_ENABLED || 'false' }}
+      DEMO_SUPABASE_PROJECT_REF: ${{ vars.DEMO_SUPABASE_PROJECT_REF }}
+      DEMO_SUPABASE_S3_ACCESS_KEY_ID: ${{ secrets.DEMO_SUPABASE_S3_ACCESS_KEY_ID }}
+      DEMO_SUPABASE_S3_SECRET_ACCESS_KEY: ${{ secrets.DEMO_SUPABASE_S3_SECRET_ACCESS_KEY }}
       TF_IN_AUTOMATION: 'true'
       TF_INPUT: 'false'
       OPERATION: ${{ inputs.operation || 'plan' }}

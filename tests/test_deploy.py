@@ -94,6 +94,7 @@ class EnvironmentTests(unittest.TestCase):
                     "PGSSLROOTCERT": "ca",
                     "EMAIL_PROVIDER": "smtp",
                     "FRONTEND_PUBLIC_URL": "http://localhost:3000",
+                    "DEMO_MODE": "true",
                 },
             ),
             patch.object(
@@ -111,9 +112,62 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(result["EMAIL_PROVIDER"], "disabled")
         self.assertEqual(result["FRONTEND_PUBLIC_URL"], "https://syncnesto.vercel.app")
         self.assertEqual(result["APP_ENV"], "production")
+        self.assertEqual(result["DEMO_MODE"], "false")
 
 
 class TerraformTests(unittest.TestCase):
+    def test_demo_runtime_inputs_are_added_without_replacing_normal_inputs(self):
+        from tests.test_demo_operations import dedicated_outputs
+
+        env = {
+            "VERCEL_API_TOKEN": "fixture",
+            "TF_VAR_demo_runtime_enabled": "true",
+            "SUPABASE_S3_ACCESS_KEY_ID": "normal-access",
+            "SUPABASE_S3_SECRET_ACCESS_KEY": "normal-secret",
+        }
+        dedicated_env = {
+            **env,
+            "DEMO_SUPABASE_PROJECT_REF": "jxtwcdmaooiasodubofu",
+            "DEMO_SUPABASE_S3_ACCESS_KEY_ID": "demo-access",
+            "DEMO_SUPABASE_S3_SECRET_ACCESS_KEY": "demo-secret",
+        }
+        with (
+            patch.object(terraform, "terraform_environment", return_value=env),
+            patch.object(
+                terraform,
+                "terraform_outputs",
+                side_effect=[
+                    {"vercel_backend_project_id": "prj_fixture"},
+                    {"backend_database_url": "normal-db"},
+                    {
+                        "backend_database_url": "postgresql://syncnesto_app:fixture@ep-demo-pooler.neon.tech/syncnesto?sslmode=verify-full"
+                    },
+                ],
+            ),
+            patch("scripts.deploy.demo.demo_outputs", return_value=dedicated_outputs()),
+            patch(
+                "scripts.deploy.demo.storage_environment",
+                side_effect=lambda current: {
+                    **current,
+                    **{
+                        key: value
+                        for key, value in dedicated_env.items()
+                        if key.startswith("DEMO_SUPABASE_")
+                    },
+                },
+            ),
+            patch.object(terraform.subprocess, "call", return_value=0) as call,
+            patch.object(sys, "argv", ["terraform", "runtime", "plan"]),
+        ):
+            self.assertEqual(terraform.main(), 0)
+        forwarded = call.call_args.kwargs["env"]
+        self.assertEqual(forwarded["TF_VAR_database_url"], "normal-db")
+        self.assertEqual(forwarded["TF_VAR_storage_access_key"], "normal-access")
+        self.assertEqual(forwarded["TF_VAR_storage_secret_key"], "normal-secret")
+        self.assertIn("ep-demo-pooler", forwarded["TF_VAR_demo_database_url"])
+        self.assertEqual(forwarded["TF_VAR_demo_storage_access_key"], "demo-access")
+        self.assertNotIn("demo-secret", " ".join(call.call_args.args[0]))
+
     def test_runtime_credentials_are_forwarded_as_environment_only(self):
         env = {
             "VERCEL_API_TOKEN": "vercel-fixture",

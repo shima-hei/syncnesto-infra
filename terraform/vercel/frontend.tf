@@ -41,6 +41,7 @@ locals {
     {
       NEXT_PUBLIC_API_BASE_URL = "/api"
       APP_ENV                  = var.app_env
+      DEMO_MODE                = tostring(var.demo_mode)
       AUTH_COOKIE_NAME         = "access_token"
       CSRF_COOKIE_NAME         = "csrf_token"
     },

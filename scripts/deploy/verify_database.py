@@ -26,10 +26,8 @@ def connect(connection: dict, **overrides):
     return result
 
 
-def main() -> None:
+def verify(owner: dict, application: dict) -> None:
     """専用の検証テーブルだけを操作し、最後に削除する。"""
-    owner = terraform_outputs()["database_admin_connection"]
-    application = terraform_outputs("neon")["verification_connection"]
     assert owner["host"] == application["host"]
     assert owner["database"] == application["database"]
     assert owner["username"] != application["username"]
@@ -150,6 +148,14 @@ def main() -> None:
             )
         admin.close()
     print("PASS: probe objects cleaned up; credentials were not printed")
+
+
+def main() -> None:
+    """通常環境の接続先を従来のstateから取得する。"""
+    verify(
+        terraform_outputs()["database_admin_connection"],
+        terraform_outputs("neon")["verification_connection"],
+    )
 
 
 if __name__ == "__main__":

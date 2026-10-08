@@ -310,21 +310,350 @@ Backendの開発用`.env`にSMTPやlocalhostの設定があっても、運用処
 APIは共有BFFキーを必須にし、公開ドキュメントを閉じ、本番Cookie・Host・TLS設定を起動時に検証します。
 ログイン10回/分・通常240回/分・全体6000回/分の制限をDBで共有します。
 Neon Freeでは接続試行自体のIP遮断はできません。TLS・認証・権限分離で保護し、攻撃を完全に遮断する保証はありません。
-## ポートフォリオ用デモへの切り替え
+## ポートフォリオで通常利用とデモ利用を共存させる
 
-`terraform/vercel`の`app_env`は既定`production`で、デモは自動で有効にしない。
-専用DB・制限付きruntime role・専用非公開バケットを準備し、`runtime`の接続先を設定した後、
-`app_env = "demo"`と`demo_data_isolated = true`を設定する。
+`terraform/vercel`の`app_env`は`production`のみを許可する。`demo_mode`は既定falseで、デモは自動で有効にしない。
+通常の`DATABASE_URL`・`AWS_*`・`SECRET_KEY`・BFF設定は維持する。
+専用DB・制限付きruntime role・専用非公開バケットを準備し、
+`runtime`に`DEMO_DATABASE_URL`・`DEMO_SECRET_KEY`・`DEMO_AWS_*`を追加した後、
+`app_env = "production"`を維持し、`demo_mode = true`と`demo_data_isolated = true`を設定する。
 このフラグは実際のバケット・DB分離の検査や資源作成を行わないため、設定確認を省略しない。
-FrontendとBackendのAPP_ENVを合わせ、Backendのメールを無効にし、BFFとは別のCRON_SECRETを使う。
-Backend CIは取得したAPP_ENVに応じて日次Cron設定を追加する。
+FrontendとBackendへ`APP_ENV=production`と`DEMO_MODE=true`を渡す。通常メール設定は維持し、デモのメール送信だけを抑止する。
+同じBackend Project内の回収CronはVercelが送る`CRON_SECRET`を使用し、JWT/BFFの秘密とは分ける。
+Backend CIは`APP_ENV=production`を検証したうえで、取得したDEMO_MODEに応じてデモの日次Cron設定を追加する。
+デモ回収は専用DB、明示した通常ごみ箱回収は既存DBに固定し、別の日次Cronとして併用できる。
+
+2026-10-08に、提案と実装の不一致を修正し、実行環境とデモ機能を分離する方針へ戻した。
+決定・変更・検証記録の正はBackendの`docs/decisions/2026-10-08-demo-mode.md`とする。
+旧`app_env = "demo"`は検証エラーとなるため、`production`へ戻して`demo_mode`を明示する。
+migration・seedなどの運用コマンドは`DEMO_MODE=false`を明示し、デモ用runtime設定を引き継がない。
 通常環境のCronは既定で登録しない。ローカル検証はmock planを使用し、cloud applyは別のリリース作業とする。
+
+### デモ専用資源の分離準備（2026-10-08）
+
+状態: 配置案・追加費用0 USD/月の条件はユーザー承認済み。専用Neonの作成・初期化・実通信検証を完了。
+Supabaseの専用Projectはユーザーが作成済み。非公開・5MiB上限の専用バケットも作成・確認済み。
+専用S3キーとデモProject限定の準備用管理トークンはユーザー承認後に発行・ローカル保存済み。
+署名付きStorage通信・容量制限・遅延PUT・期限切れセッションの回収を専用資源で検証済み。
+新規Neon用の2構成だけをapply済み。Vercelの環境変数変更・デプロイは未実施。
+ユーザー指示に従いローカルコミットまでとし、pushは保留する。
+`APP_ENV=production` / `DEMO_MODE=true` の方針は変更しない。
+
+#### 作成前の現構成の確認結果
+
+| 対象 | 確認した状態 |
+| --- | --- |
+| Neon | `misty-band-66896279` / `br-green-flower-azgbl4jk`（production）、PostgreSQL 17、Free `free_v3` |
+| 業務DB | `syncnesto`、revision `48bb3c9773b3`、User 1・Tenant 1・Project 0・DemoSession 0 |
+| DB権限 | runtimeは`syncnesto_app`。superuser / create DB / create role / bypass RLSなし。管理用ownerと分離 |
+| Terraform state | 既存Neon内の`syncnesto_terraform`、専用`syncnesto_tfstate`。業務DBと別DB |
+| Supabase | `pdyywnoregglnyjlapta`、`ap-southeast-1`。接続から見えるProjectは1件 |
+| バケット | `syncnesto-portfolio`、private、1ファイル20MiB上限。2オブジェクト、合計1,104,355 bytes |
+| Vercel | Backendの`APP_ENV=production` / `FILE_UPLOAD_MODE=presigned`、S3 endpointとbucketは上記を参照 |
+| デモ設定 | Backend・FrontendのProduction環境変数に`DEMO_MODE`なし。専用資源は未作成 |
+
+DBは集計とrole属性、Storageはバケット設定と件数・容量、Vercelは非秘密設定と秘密の存在・種別だけを確認した。
+Userのメール、DBパスワード、S3キー、JWT/BFF秘密、署名URL、オブジェクト本文はこの記録に保存しない。
+Vercelの`sensitive`な`DATABASE_URL`は復号していない。DB接続先はTerraformの管理情報を確認したもので、
+公開runtimeがその値を使用していることの最終確認は切り替え時の実通信で行う。
+
+#### 分離する資源
+
+1. **Neonに空の新規Project `syncnesto-demo`を作る**。既存のproduction branchやstate DBの複製は行わない。
+   同じOrganization `org-empty-dew-85265327`、同じSingapore regionを候補とし、PostgreSQL 17、compute 0.25 CU、
+   Freeの自動停止と6時間の履歴保持を維持する。実際のID・hostは作成後に記録し、既存IDを推測で流用しない。
+2. 新しいDBにも既存と同じ`syncnesto_owner` / `syncnesto_app`の権限分離を適用する。
+   資格情報は新規生成し、runtimeはpooler、migration・検証・backupはdirect接続、いずれも`sslmode=verify-full`を要求する。
+   runtimeにowner URI・Terraform state接続・クラウド管理トークンを渡さない。
+3. **Supabaseにも別Project `syncnesto-demo`とprivate bucket `syncnesto-demo`を作る**。
+   2026-10-08に既存Organization `shima-hei`（`yxsnqlgubcohdavdcpry`）での作成をユーザーが承認した。
+   Singapore regionを使用する。作成前の費用確認は別途行い、課金を伴う作成はしない。
+   新しいProject専用S3キーを使い、既存Projectのキー・オブジェクトを持ち込まない。
+   バケット側も1ファイル5MiBを上限にし、既存の5MiBのデモ制限と揃える。
+4. `default-avatar.png`だけをリポジトリの静的ファイルから用意する。利用者が書くファイルは`demo/<UUID>/`配下に限定する。
+   Backendの既存S3互換APIとpresigned方式、Frontendのupload planを継続する。
+5. Vercelの既存2プロジェクトと公開URL・通常の接続設定を維持する。専用資源を検証した後にデモ専用接続を追加する。
+   既存DB・Storage・stateは保持し、通常データの削除や既存Projectの置き換えをplanに含めない。
+
+Supabaseの静的S3 access keyは、同じProject内の**全バケットに全S3操作を許可し、RLSを迂回する**。
+別バケットだけでは、漏えいしたデモ用キーから既存Storageを保護できないため、Projectも分離する。
+JWTによるStorage RLSへ移行する方式は、現在のFastAPI認証とS3構成を変更するため今回の案には含めない。
+この分離はアプリのDB/S3資格情報の到達範囲を限定するもの。Organization管理トークンは別途、運用側で保護する。
+根拠: [Supabase S3 Authentication](https://supabase.com/docs/guides/storage/s3/authentication)。
+
+#### 無料枠と容量
+
+- Neonの現在の公式料金表はFreeが100 Projects、1 Projectあたり100 CU-hours/月・Postgres 1GB、
+  全ProjectのPostgres合計20GB、5分無操作で停止と案内している。既存ProjectのAPI上限も1GiBだった。
+  過去の0.5GBという資料を現行上限として使わない。作成時には対象Organizationと新Projectの実際のプラン・上限を再確認する。
+  [Neon Pricing](https://neon.com/pricing.md)、[Neon Plans](https://neon.com/docs/introduction/plans.md)。
+- Supabaseの公式Freeはactive Projects最大2件、file storage 1GB、1週間無操作でpauseとなる。
+  接続から見える1件だけで、アカウント全体の残枠やOrganizationの料金を確定しない。
+  課金なしで作成できることを確認できなければ作成を止め、有料化・枠の迂回をしない。
+  [Supabase Pricing](https://supabase.com/pricing)。
+- 現在のデモは未回収も含め全体10件、1デモ10ファイル予約・合計20MiB、1件5MiB。
+  論理予約の合計は最大200MiBだが、確定前の一時キー・遅延PUT・コピー中の重複は物理容量と別に評価する。
+  DBは1デモ500業務行・Project 3件・一時User 10人。行数制限だけでDBの実容量や月間転送量は保証しない。
+- 公開前にDB実容量、Storage実容量、未回収件数、回収失敗、利用量上限を確認する手順を用意する。
+  無料枠の超過・pauseは体験の可用性を下げるため、デモの継続運用に含めて扱う。
+  新しい定期監視や有料サービスはこの準備作業では作成しない。
+
+#### IaCと初期化の変更点
+
+- 現在の`neon_project.portfolio`と`portfolio_state` / `database_state` / `runtime_state`は維持する。
+  `project_name`の書き換えで既存Projectをデモ用に転用しない。
+- デモのNeon資源・runtime roleには独立した構成とstate schema（`demo_resources_state` / `demo_database_state`）を用意する。
+  state自体は運用側の既存`syncnesto_terraform`に置き、デモ業務DBへstateを複製しない。
+  新stateの初回構築と既存stateの更新を分け、既存CIの「空state拒否」を外さない。
+- Vercelの環境変数は既存のstateで一元管理する。別stateから同じ環境変数を重複管理しない。
+  `runtime_state`の通常入力元は変えず、`TF_VAR_demo_runtime_enabled=true`でデモ専用入力を追加する。
+  現在の`terraform` / `migrate` / `seed` / `verify-database`は既存Neonのoutputを読むため、
+  デモ用のtargetを明示し、旧host / Project / bucketを拒否してから実行する経路が必要。
+- `scripts/deploy/storage.py`は既存Project・bucketが固定されている。デモのprepare/verify/cleanupに流用せず、
+  Project・bucket・region・originを明示する経路を追加する。既存のprepareやcleanupをこの準備では実行しない。
+- 新DBはAlembicで構築し、`seed_roles_and_permissions`の既存処理を再利用してRBACだけを作る経路を追加する。
+  現行`seed_rbac` / Infraの`seed`は初期system_adminも作るため、そのまま実行しない。
+  既存migrationが作る空のDefault Tenantと共通Roleは許容し、User・通常ログイン用管理者・業務データは作らない。
+  サンプルはデモ開始時に既存`DemoService`で生成する。既存Alembic履歴や認可モデルは変更しない。
+- `DEMO_DATA_ISOLATED=true`は運用上の確認宣言であり、資源ID・接続先・キーの分離を自動検査しているわけではない。
+  flagだけで公開せず、Project ID、DB host、runtime権限、private bucket、鍵の所属を確認した記録を残す。
+- 通常の`MIGRATION_DATABASE_URL`、Infra CIのDB/S3入力元は維持する。
+  デモmigration・seed・回収は`demo`コマンドで専用targetを指定する。
+  公開前にCIにも追加のデモ入力と有効化設定を揃え、次のCIでデモ設定が消える状態を作らない。
+
+#### デモ接続の追加と停止
+
+1. 新規資源の作成先・無料枠・費用を確認し、専用資源だけを作成する。
+   ID・host・bucket・roleと配置を秘密なしの一覧へ追記し、作成planに既存資源の削除・置き換えがないことを確認する。
+2. 新DBへmigrationとRBACのみのseedを行い、User 0・Project 0・通常管理者なしを確認する。
+   新roleのCRUD・DDL拒否・TLS、新bucketの非公開性・presigned PUT/GET・CORS・サイズ拒否を検証する。
+   検証用オブジェクトは専用prefixに限定して回収する。
+3. pushが許可された後に`DEMO_MODE`修正とデモ準備コードをCIで検証する。
+   本番移行前に既存DB・stateと非秘密設定の一覧を所有者専用でbackupし、秘密の戻し先を安全に確保する。
+   新DBのdirect URIとruntime pooler URIが同じ専用Projectを参照することを確認する。
+4. Backend→Frontendの順に公開する。通常DB/S3/JWT/BFFの設定を保持し、デモ専用DB/S3/JWTの設定だけを追加する。
+   `APP_ENV=production`、両方の`DEMO_MODE=true`、Backendの`DEMO_DATA_ISOLATED=true`を設定する。
+   通常ログインは既存DB、署名・audienceを検証したデモCookieは専用DBへ向くことを確認する。
+   通常のメールと30日ごみ箱回収設定は維持する。API URL・Cookie名・CSRF・RBACは継続する。
+5. 公開URLで2人の別デモ、要件・タスク・テスト・ドキュメント、組織管理、5MiB以下の添付を確認する。
+   通常アカウントが従来のDB・Storageを使うこと、他デモ参照・デモの運営権限を拒否すること、ログアウト・idle/absolute失効・リセットのアクセス失効、
+   業務行・User・ファイルと遅延PUTの最終回収、Cron認可と再試行を確認する。
+6. 停止時は両方の`DEMO_MODE=false`へ変更して再デプロイする。通常接続や通常の秘密を変更・復元する必要はない。
+   デモ専用接続を残して回収API/CLIを継続し、未回収が0になる前に新資源を削除しない。
+   デモを通常DBへコピーしない。フラグ無効化だけでは物理回収完了を意味しない。
+
+ログアウト・失効時のアクセス拒否と物理削除の完了時刻は区別する。
+現行のCronは日次で、ブラウザを閉じた後の物理回収・障害再試行・発行済みPUTの最終回収が遅れる場合がある。
+Neonの履歴・所有者専用backupに残るデータの即時消去も保証しない。
+「終了と同時に全媒体から完全削除」とは案内せず、体験終了後にアクセスを失効し、回収を再試行する現在の仕様を維持する。
+
+#### 専用資源の操作コマンド
+
+`terraform/demo`は空のNeon Projectと独立したJWT/BFF/Cron秘密、`terraform/demo-neon`は既存と同じ制限付きroleを扱う。
+既存のrole構成・resource addressは変更せず、デモ用の接続先検査を追加した別stackにした。
+通常のCIが実行するstackは従来の3つに限定し、追加のデモstackを自動applyしない。
+`make check`のローカル検証にはデモの2構成も含める。
+
+費用・無料プラン確認と既存stateのbackupが終わってから、以下を実施する。
+`init`は共有stateに専用schemaを作るため、この準備段階では実行していない。
+`free_plan_confirmed`は確認宣言であり、Neonの請求情報を自動検査する機能ではない。
+
+```sh
+uv run python -m scripts.deploy terraform demo init -input=false -lockfile=readonly
+uv run python -m scripts.deploy terraform demo plan -input=false -var=free_plan_confirmed=true -out=demo.tfplan
+# planの新規資源だけを確認してからapply。生のplan・stateを公開しない。
+uv run python -m scripts.deploy terraform demo apply -input=false demo.tfplan
+
+uv run python -m scripts.deploy terraform demo-neon init -input=false -lockfile=readonly
+uv run python -m scripts.deploy terraform demo-neon plan -input=false -out=demo-neon.tfplan
+uv run python -m scripts.deploy terraform demo-neon apply -input=false demo-neon.tfplan
+
+uv run python -m scripts.deploy demo migrate
+uv run python -m scripts.deploy demo seed
+uv run python -m scripts.deploy demo verify-database
+```
+
+`demo`コマンドは専用stateを読み、通常Project ID・DB host・異なるpooler・state DB・TLS未検証URIを拒否する。
+`demo seed`はUser・Project・DemoSessionが0件であることを確認し、Backendの`seed_rbac --roles-only`だけを呼ぶ。
+通常の`seed`では従来どおり初期管理者を作る。API契約・DBモデル・Alembic履歴は変更しない。
+運用用Backend subprocessは`APP_ENV=production` / `DEMO_MODE=false` / メール無効で動かし、
+Terraform state・クラウド管理トークンを子プロセスへ渡さない。
+
+Storageの専用S3キーを`.env.demo.local`またはexportした環境変数へ設定する。
+ファイルを使う場合は`.env.demo.local.example`を参考にし、所有者専用の`chmod 600`を必須とする。
+既存PATが専用Projectにアクセスできない場合は、既存の権限を変更せず
+`DEMO_SUPABASE_ACCESS_TOKEN`に専用のscoped PATを設定する。
+対象はデモProjectだけ、準備時は7日間、Project Settings / API Keys / API Key SecretsをそれぞれReadにする。
+空の場合のみexport済み`SUPABASE_ACCESS_TOKEN`を使用する。管理トークンはBackend subprocessに渡さない。
+根拠: [Supabase Personal Access Tokens](https://supabase.com/docs/guides/platform/personal-access-tokens)。
+通常のS3キーへのfallbackをせず、通常Project refや通常キーの再利用を拒否する。
+prepare/verify前には管理APIで承認済みOrganization・Project名・region・稼働状態を確認し、
+指定S3 endpointでキーが認証できることを読み取りで確認する。
+
+```sh
+# .env.demo.localへ専用S3キーとDEMO_SUPABASE_ACCESS_TOKENを設定する。
+uv run python -m scripts.deploy demo storage prepare
+uv run python -m scripts.deploy demo storage verify
+
+# Vercelのデモ受付を止めた後も、専用DB・Storageだけを対象に確認/回収できる。
+uv run python -m scripts.deploy demo cleanup
+uv run python -m scripts.deploy demo cleanup --execute
+```
+
+回収は標準でdry-run、`--execute`で既存`DemoService`の期限切れ・所有範囲・再試行処理を使う。
+一回最大10件。`pending`は今回の処理対象内の未完了数で、`remaining`は利用中・遅延PUT待ち・障害待ちを含む全未完了台帳数。
+`pending=0`だけで回収完了と判断せず、`cleanup_after`まで待つ台帳は後で再実行する。
+通常Identityや業務本文・署名URL・資格情報は出力せず、処理件数と未完了件数だけを表示する。
+Vercelの接続先・CI入力・公開用秘密の切り替えは、この準備用コマンドでは行わない。
+
+#### ローカル実装の作業・検証記録
+
+- 2026-10-08: 空のNeon＋別Supabaseという構成と、Supabase Organization `shima-hei`をユーザーが承認。
+- Supabase MCPの`get_cost`は、接続先の`tools/list`に提供されておらず利用できなかった。
+  ブラウザの[対象OrganizationのBilling](https://supabase.com/dashboard/org/yxsnqlgubcohdavdcpry/billing)で
+  Free Plan / Spend cap enabledを確認。新規Project画面のOrganizationも`shima-hei FREE`を確認した。
+  Free枠内の追加費用0 USD/月という条件をユーザーへ確認してから資源を作成する。
+  APIによる見積もり取得成功とは記録しない。
+- Backend: `--roles-only`と専用回収CLIを追加。関連PostgreSQL回帰25件成功（14.93秒、既存警告1件）。
+  通常の管理者seed維持、管理者なしのRBAC初期化、デモ無効時のdry-run/回収、既存のデモ境界・容量・破棄を含む。
+  ruff / pyright成功。API契約・DBモデルの変更がないためOrval再生成・新migrationは不要。
+- Infra: Python単体24件、ruff / format、全6構成のvalidate、模擬plan 21件成功。
+  本番CIのstack維持、通常接続先・Storageキーの拒否、private / 5MiBの指定、管理トークンの子プロセス除外を確認。
+  新規2構成のProvider lockはmacOS ARM64 / Linux AMD64を固定した。
+- `git diff --check`成功。変更は本体のBackend・Infraに別々のローカルコミットへ保存。
+- 今回のTerraform初期化は`-backend=false`でProvider検証だけを行った。共有stateのbootstrap/initやcloud applyは実行していない。
+  cloud migration/seed・Storage prepare/verify・資源作成・環境変数変更・push・デプロイは未実施。
+  クラウドの実通信検証と公開後のライフサイクル確認は、資源作成・公開切り替え後に実施する。
+
+#### 専用資源の作成・実通信検証（2026-10-08）
+
+ユーザーが「無料枠内・追加0 USD/月で作成する」を承認したため、新規資源の作成へ進んだ。
+準備コードのコミットはBackend `a328b72` / Infra `436b4a8`。push・公開切り替えは許可されていない。
+
+| 対象 | 作成・確認した状態 |
+| --- | --- |
+| Neon Organization | `org-empty-dew-85265327`、Management APIで`plan=free`を作成前・作成後に確認 |
+| 専用Project | `sweet-frost-26809709` / `syncnesto-demo`、`aws-ap-southeast-1`、PostgreSQL 17 |
+| 専用branch | `br-blue-star-b34rxuyc`、空の新規Projectから作成。既存branchから複製していない |
+| direct host | `ep-square-dew-b360h9ls.c-4.ap-southeast-1.aws.neon.tech` |
+| pooler host | `ep-square-dew-b360h9ls-pooler.c-4.ap-southeast-1.aws.neon.tech` |
+| 容量・履歴 | APIのbranch上限1,073,741,824 bytes、履歴保持21,600秒 |
+| Compute | 最小・最大0.25 CU、APIの`suspend_timeout_seconds=0`（global default）。停止無効の`-1`を指定していない |
+| 業務DB | `syncnesto`、revision `48bb3c9773b3`、User 0・Tenant 1・Project 0・DemoSession 0、約12.1MB |
+| RBAC | Role 8・Permission 38。通常ログイン用の初期管理者を作成していない |
+| DBユーザー | migration owner `syncnesto_owner`、runtime `syncnesto_app`。専用の新規パスワード |
+| 新state | `demo_resources_state` / `demo_database_state`、運用側の既存state DB内に新設 |
+| Supabase | ユーザー作成の`jxtwcdmaooiasodubofu` / `syncnesto-demo`、`shima-hei`、`ap-southeast-1`、`ACTIVE_HEALTHY` |
+| Storage | `syncnesto-demo`、private、上限5,242,880 bytes。専用S3キー発行済み、静的default avatar配置・署名通信確認済み |
+| 公開状態 | 既存Vercelの接続先・秘密・環境変数・deploymentを維持。デモは未有効化 |
+
+Neon Providerの`suspend_timeout_seconds=0`はglobal default（5分）を意味する。
+Freeでは停止時間の明示指定を避け、既存構成と同じ既定値を使用した。
+根拠: [Neon Project Provider](https://registry.terraform.io/providers/kislerdm/neon/0.18.0/docs/resources/project)。
+
+- 既存の3つのremote stateを所有者専用の`state-backups/20261008T040247Z-demo-prepare/`へ保存してから新stateをinitした。
+  `bootstrap-state`は再実行していない。既存3stateのlineage / serial / resources / outputsは作成後も変更なし。
+- 実際のplanはNeon Project＋独立秘密の4件、専用role・grant等の10件を新規作成する内容で、削除・置き換え0件。
+  そのplanだけをapplyした。plan・state・生ログはGit除外の所有者専用領域へ保存し、秘密はこの記録に含めない。
+- `demo migrate` / `demo seed` / `demo verify-database`成功。
+  direct / poolerのTLS・runtime CRUD・sequence・将来作成する表の権限を実通信で確認した。
+  create table / role / database、owner tableのdropを`insufficient_privilege`で拒否。
+  不正パスワード・暗号化なし・CAなしも拒否され、検証用オブジェクトは回収済み。
+- 新DBのUser・Project・DemoSessionは0件。既存DBもUser 1・Tenant 1・Project 0・DemoSession 0を維持。
+  通常データのmigration・seed・削除、既存Storageへの書き込みは行っていない。
+- 回収CLIに既存Repositoryの`unfinished_count`を使う`remaining`表示を追加。
+  今回の対象0件でも将来の`cleanup_after`を待つ台帳が残るケースを回帰テストで確認した。
+  Backendの関連26件成功（15.21秒、既存警告1件）、ruff / pyright成功。Infra単体24件・ruff / format成功。
+  専用DB上のdry-run / executeも対象0・全残件0を確認。Storageや実データを含む回収の実通信検証とは区別する。
+- Supabase MCPの費用照会は利用不能、既存PATのOrganization読み取り・Project作成は403。
+  Organization一覧が空で、参照できるProjectは既存の1件のみ。権限を推測で拡張したり既存資格情報を変更していない。
+  ブラウザも別のChrome拡張機能画面が開いているため操作を停止した。
+  DBパスワード設定・作成はブラウザ操作ルールに従いユーザーへ引き継ぎ、資源作成待ちとした。
+
+#### Supabase Project作成後の確認・準備（2026-10-08）
+
+- ユーザーの「作ったよ」を受け、MCPで専用ProjectのID・Organization・名前・Singapore・正常稼働を確認。
+  Organization詳細も`plan=free`。既存のshell PATから参照できるProjectは引き続き既存1件のみで、
+  MCP接続の権限とshell PATの権限を混同しない。
+- 専用Project内にprivate bucket `syncnesto-demo`をDashboardから作成。
+  Storageメタデータの読み取りで`public=false`、`file_size_limit=5242880`、オブジェクト0件を確認。
+  Data API画面の`Enable Data API`もfalse。テーブル自動公開・自動RLSの個別設定は今回未確認。
+- S3キー`syncnesto-demo-backend`と、専用Projectのみ・7日間・上記3項目のRead権限を持つ
+  scoped PAT `syncnesto-demo-storage-setup`の確認画面を準備。永続的アクセスを作るブラウザ操作のため
+  発行・所有者専用ローカル保存の実行直前確認をユーザーへ依頼した。まだ発行していない。
+- Infraの準備コマンドに`DEMO_SUPABASE_ACCESS_TOKEN`の明示指定を追加。
+  Project所属確認とbucket設定に同じ専用PATを使い、既存PATや通常S3キーの権限を変更しない。
+  Python単体26件・ruff / format / `git diff --check`成功。管理トークンの子プロセス除外、専用PATの優先、認証情報なしで通信しないことを確認。
+  Terraform・API契約・DBモデル・Frontendは変更していない。
+- `.env.demo.local`は専用Project refと空のキー欄だけで作成。Git対象外・権限600を確認した。
+  既存Storageはprivate / 20MiB上限 / 2オブジェクト / 1,104,355 bytesを維持していることを読み取りで確認。
+
+#### 専用Storage資格情報と実通信検証（2026-10-08）
+
+- ユーザーの実行直前承認後、専用S3キーと7日間のscoped PATを発行。
+  PATはデモProjectだけを対象にProject Settings / API Keys / API Key SecretsをReadとした。
+  `.env.demo.local`へ直接保存し、Git対象外・権限600を確認。既存PAT・既存S3キーは変更していない。
+- 初回の未使用S3キーの値が確認用ツール出力へ出たため、アプリへ設定せずに差し替えた。
+  ユーザーに失効の実行直前確認を取り、初回キーの失効と一覧からの消失を確認してから
+  同一権限で再発行した。現在のキーは出力せずローカル設定へ直接保存し、一覧はこのキー1件だけ。
+  チャットの初回キーは失効済みで、現在の値をこの記録・コミットには含めない。
+- `demo storage prepare`成功。承認したProject所属と専用S3認証を確認してprivate / 5MiBを設定し、
+  リポジトリの静的`default-avatar.png`だけを配置した。
+- `demo storage verify`成功。署名PUT / GET、SDK read、ブラウザ向けCORS preflight、
+  匿名GET・public URL・不正署名の拒否を実通信で確認し、検証オブジェクトを回収した。
+- 5MiB+1 byteの署名PUTはHTTP 413で拒否。最初の確認コードはS3エラーコード文字列を取得できず失敗したが、
+  HTTPステータスを直接確認する再検証で413と回収後のdefault avatar 1件を確認した。設定は変更していない。
+- 専用DBの制限付きruntime role / poolerと本物のS3を使う2セッションの検証が成功。
+  Vercelの公開設定は変更せず、検証subprocess内だけ`DEMO_MODE=true`・PUT TTL 45秒とした。
+  ログアウト時の業務データ削除・別セッション維持・遅延署名PUTの再出現を確認した。
+  実際のPUT TTLと60秒の回収猶予を経過させ、期限後のPUT拒否と再出現ファイルの最終回収も確認。
+  `DEMO_MODE=false`でdry-runからexecuteへ進み、他の利用中セッションを維持したまま回収できた。
+- 2つ目のセッションはDBの`expires_at`を検証用に過去へ調整し、既存`bind`の期限切れ拒否・失効・回収を確認した。
+  通常の15分無操作を実時間で待った検証ではない。最後にUser / Project / DemoUpload / 未回収台帳0件、
+  元のTenant 1件、`cleaned`台帳2件、Storageはdefault avatar 1件のみとなった。
+  完了台帳は再試行管理のため既存の保持・prune方針を維持し、検証の都合で消していない。
+- 実通信検証はBackendの既存Serviceと専用PostgreSQL / S3を対象とした。
+  Vercel上のCookie / BFF / 画面を通す確認は公開切り替え後に行う。
+  検証用スクリプトとログはGit対象外・権限600の`state-backups/`に保存。
+
+残りは通常接続を保持したデモ専用runtime入力・CI Secretの追加と、公開後のVercel全体フロー確認。
+パスワードやS3キーはチャットへ送らず、所有者専用のローカル設定へ保存する。
+通常のDB・S3・JWT・BFF・CI Secretは置き換えない。push・公開反映は引き続き保留する。
+
+### 通常利用とデモ利用の共存設定（2026-10-08 修正）
+
+専用資源作成の承認を既存API全体の切り替えへ拡張した計画を訂正した。
+通常ログインは従来の接続先を維持し、Backendで検証済みデモセッションだけを専用接続へ振り分ける。
+現在の合意と照合結果の正はBackendの`docs/decisions/2026-10-08-demo-mode.md`。
+
+- `TF_VAR_demo_runtime_enabled=true`で`runtime`へ7つのデモ専用環境変数を追加する。
+  通常の`DATABASE_URL`・`AWS_*`・`SECRET_KEY`・BFF・通常メール設定を保持する。
+  デモの制限付きpooler URIは`demo-neon`、署名鍵は`demo`のoutputから取り、通常outputに上書きしない。
+- CIの追加入力はRepository Variableの`DEMO_RUNTIME_ENABLED` / `DEMO_SUPABASE_PROJECT_REF`と、
+  Secretの`DEMO_SUPABASE_S3_ACCESS_KEY_ID` / `DEMO_SUPABASE_S3_SECRET_ACCESS_KEY`。
+  現在は公開側へ未登録で、既定false。ローカルは承認済み`.env.demo.local`を補完に使う。
+- Backend CIには`DEMO_MIGRATION_DATABASE_URL`を追加する。通常の`MIGRATION_DATABASE_URL`は維持する。
+  デモ接続を残す間は両DBにmigrationを適用し、別host・owner direct・TLSを事前検査する。
+- 回収CLIは`DEMO_DATABASE_URL`と`DEMO_AWS_*`を使う。運用専用processの通常接続は接続不能な
+  `unused.invalid`へ固定し、通常資源を利用できない。migration / RBAC seedは従来どおり専用DBのdirect接続を使う。
+- Vercel Cronの秘密は同一Project内の共通`CRON_SECRET`を維持する。
+  Vercelが自動送信する秘密はProject単位のため、デモ専用の別秘密へ置き換えない。
+  デモは専用DB、30日ごみ箱回収は既存DBへ固定し、日次ジョブを分ける。
+  [Cron認証](https://vercel.com/docs/cron-jobs/manage-cron-jobs)、
+  [Hobbyの頻度制限](https://vercel.com/docs/cron-jobs/usage-and-pricing)。
+
+クラウド資源・公開環境変数の変更、migration、push、デプロイは今回の修正で実行していない。
+停止時は両方の`DEMO_MODE=false`とし、専用接続と回収を残す。通常接続を戻す作業は不要。
+Backendのデプロイ設定生成は、受付停止後も専用接続が設定されている間はデモ回収Cronを維持する。
+この修正のローカル検証はPython単体28件、ruff / format、6構成のTerraform validate・mock test計22件が成功。
+クラウドstateへの接続・apply・公開設定変更は行っていない。
 
 ## 通常データの30日保持後の定期回収
 
 `terraform/vercel` の `deleted_data_cleanup_mode` は既定 `disabled`。
 通常環境だけで `deleted_data_cleanup_tenant_ids` を明示し、まず `dry_run` で対象確認する。
-候補・監査結果を確認後に `execute` へ変更する。Demoとの併用と対象未指定をplan時に拒否する。
+候補・監査結果を確認後に `execute` へ変更する。対象未指定をplan時に拒否する。
+デモ回収とは接続先・対象を分けて併用できる。
 既存のBackend専用 `CRON_SECRET` を使い、Frontendには回収設定・秘密を渡さない。
 
 Backendのデプロイ設定生成がmodeに応じて `/internal/trash/cleanup` の日次Cronを登録する。

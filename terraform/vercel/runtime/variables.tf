@@ -57,3 +57,54 @@ variable "credential_version" {
   type        = number
   default     = 1
 }
+
+variable "demo_runtime_enabled" {
+  description = "Add dedicated demo connections without replacing normal connections."
+  type        = bool
+  default     = false
+}
+
+variable "demo_database_url" {
+  type      = string
+  sensitive = true
+  ephemeral = true
+  default   = ""
+  validation {
+    condition     = !var.demo_runtime_enabled || (startswith(var.demo_database_url, "postgresql://syncnesto_app:") && endswith(var.demo_database_url, "?sslmode=verify-full"))
+    error_message = "Demo runtime requires a restricted URI with verified TLS."
+  }
+}
+
+variable "demo_secret_key" {
+  type      = string
+  sensitive = true
+  ephemeral = true
+  default   = ""
+  validation {
+    condition     = !var.demo_runtime_enabled || length(var.demo_secret_key) >= 32
+    error_message = "Demo JWT signing key must have at least 32 characters."
+  }
+}
+
+variable "demo_storage_access_key" {
+  type      = string
+  sensitive = true
+  ephemeral = true
+  default   = ""
+}
+
+variable "demo_storage_secret_key" {
+  type      = string
+  sensitive = true
+  ephemeral = true
+  default   = ""
+}
+
+variable "demo_supabase_project_ref" {
+  type    = string
+  default = "jxtwcdmaooiasodubofu"
+  validation {
+    condition     = can(regex("^[a-z]{20}$", var.demo_supabase_project_ref)) && var.demo_supabase_project_ref != var.supabase_project_ref
+    error_message = "Demo Storage must use a separate Supabase Project."
+  }
+}

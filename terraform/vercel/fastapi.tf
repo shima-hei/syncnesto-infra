@@ -18,12 +18,12 @@ resource "vercel_project" "backend" {
   lifecycle {
     prevent_destroy = true
     precondition {
-      condition     = var.app_env != "demo" || var.demo_data_isolated
+      condition     = !var.demo_mode || var.demo_data_isolated
       error_message = "Configure a dedicated demo database and private bucket before setting demo_data_isolated=true."
     }
     precondition {
-      condition     = var.deleted_data_cleanup_mode == "disabled" || (var.app_env == "production" && length(var.deleted_data_cleanup_tenant_ids) > 0)
-      error_message = "Scheduled trash cleanup requires production and explicitly selected tenant IDs."
+      condition     = var.deleted_data_cleanup_mode == "disabled" || length(var.deleted_data_cleanup_tenant_ids) > 0
+      error_message = "Scheduled trash cleanup requires explicitly selected normal tenant IDs."
     }
   }
 }
@@ -36,6 +36,7 @@ resource "vercel_project_domain" "backend" {
 locals {
   backend_environment = merge({
     APP_ENV                             = var.app_env
+    DEMO_MODE                           = tostring(var.demo_mode)
     DEMO_DATA_ISOLATED                  = tostring(var.demo_data_isolated)
     DELETED_DATA_CLEANUP_MODE           = var.deleted_data_cleanup_mode
     DELETED_DATA_CLEANUP_TENANT_IDS     = join(",", [for id in var.deleted_data_cleanup_tenant_ids : tostring(id)])
@@ -50,7 +51,7 @@ locals {
     SQL_ECHO                            = "false"
     LOG_FORMAT                          = "json"
     ALLOWED_HOSTS                       = join(",", distinct(concat([var.backend_domain], var.backend_allowed_hosts)))
-  }, var.app_env == "demo" ? { EMAIL_PROVIDER = "disabled" } : {})
+  })
 }
 
 resource "random_password" "demo_cron_secret" {
