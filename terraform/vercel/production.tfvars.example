@@ -1,4 +1,6 @@
 project_name          = "syncnesto"
+app_env               = "production"
+demo_mode             = false
 vercel_team_id        = "team_WyjvWWMPeMn7kxuteyNsC7EE"
 connect_github        = false
 backend_api_url       = "https://syncnesto-api.vercel.app"

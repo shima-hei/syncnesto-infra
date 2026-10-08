@@ -25,6 +25,10 @@ run "bootstrap_without_backend" {
     condition     = nonsensitive(vercel_project_environment_variable.backend_public["DELETED_DATA_CLEANUP_MODE"].value) == "disabled" && nonsensitive(vercel_project_environment_variable.backend_public["DELETED_DATA_CLEANUP_TENANT_IDS"].value) == ""
     error_message = "Normal data cleanup must remain disabled until tenant IDs are explicitly reviewed."
   }
+  assert {
+    condition     = nonsensitive(vercel_project_environment_variable.backend_public["APP_ENV"].value) == "production" && nonsensitive(vercel_project_environment_variable.frontend["APP_ENV"].value) == "production" && nonsensitive(vercel_project_environment_variable.backend_public["DEMO_MODE"].value) == "false" && nonsensitive(vercel_project_environment_variable.frontend["DEMO_MODE"].value) == "false"
+    error_message = "Default deployments must keep production security with demo disabled."
+  }
 }
 
 run "connect_ready_backend" {
@@ -78,7 +82,7 @@ run "reject_wildcard_backend_host" {
 run "reject_demo_with_shared_data" {
   command = plan
   variables {
-    app_env = "demo"
+    demo_mode = true
   }
   expect_failures = [vercel_project.backend]
 }
@@ -86,17 +90,29 @@ run "reject_demo_with_shared_data" {
 run "explicit_isolated_demo" {
   command = plan
   variables {
-    app_env            = "demo"
+    demo_mode          = true
     demo_data_isolated = true
   }
   assert {
-    condition     = nonsensitive(vercel_project_environment_variable.backend_public["APP_ENV"].value) == "demo" && nonsensitive(vercel_project_environment_variable.frontend["APP_ENV"].value) == "demo"
-    error_message = "Demo behavior must agree on frontend and backend."
+    condition     = nonsensitive(vercel_project_environment_variable.backend_public["APP_ENV"].value) == "production" && nonsensitive(vercel_project_environment_variable.frontend["APP_ENV"].value) == "production" && nonsensitive(vercel_project_environment_variable.backend_public["DEMO_MODE"].value) == "true" && nonsensitive(vercel_project_environment_variable.frontend["DEMO_MODE"].value) == "true"
+    error_message = "Demo flags must agree while both apps keep production security."
+  }
+  assert {
+    condition     = nonsensitive(vercel_project_environment_variable.backend_public["EMAIL_PROVIDER"].value) == "disabled" && nonsensitive(vercel_project_environment_variable.backend_public["AUTH_COOKIE_SECURE"].value) == "true" && nonsensitive(vercel_project_environment_variable.backend_public["CSRF_COOKIE_SECURE"].value) == "true" && nonsensitive(vercel_project_environment_variable.backend_public["ALLOW_AUTHORIZATION_HEADER"].value) == "false"
+    error_message = "Demo must disable mail and keep Secure cookies and Cookie-only authentication."
   }
   assert {
     condition     = vercel_project_environment_variable.demo_cron_secret.sensitive && vercel_project_environment_variable.demo_cron_secret.key == "CRON_SECRET"
     error_message = "Cleanup credentials must only be installed as a backend secret."
   }
+}
+
+run "reject_legacy_demo_environment" {
+  command = plan
+  variables {
+    app_env = "demo"
+  }
+  expect_failures = [var.app_env]
 }
 
 run "explicit_normal_cleanup_dry_run" {
@@ -126,7 +142,7 @@ run "reject_cleanup_without_tenants" {
 run "reject_cleanup_in_demo" {
   command = plan
   variables {
-    app_env                         = "demo"
+    demo_mode                       = true
     demo_data_isolated              = true
     deleted_data_cleanup_mode       = "execute"
     deleted_data_cleanup_tenant_ids = [1]

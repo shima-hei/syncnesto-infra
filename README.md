@@ -312,12 +312,18 @@ APIは共有BFFキーを必須にし、公開ドキュメントを閉じ、本�
 Neon Freeでは接続試行自体のIP遮断はできません。TLS・認証・権限分離で保護し、攻撃を完全に遮断する保証はありません。
 ## ポートフォリオ用デモへの切り替え
 
-`terraform/vercel`の`app_env`は既定`production`で、デモは自動で有効にしない。
+`terraform/vercel`の`app_env`は`production`のみを許可する。`demo_mode`は既定falseで、デモは自動で有効にしない。
 専用DB・制限付きruntime role・専用非公開バケットを準備し、`runtime`の接続先を設定した後、
-`app_env = "demo"`と`demo_data_isolated = true`を設定する。
+`app_env = "production"`を維持し、`demo_mode = true`と`demo_data_isolated = true`を設定する。
 このフラグは実際のバケット・DB分離の検査や資源作成を行わないため、設定確認を省略しない。
-FrontendとBackendのAPP_ENVを合わせ、Backendのメールを無効にし、BFFとは別のCRON_SECRETを使う。
-Backend CIは取得したAPP_ENVに応じて日次Cron設定を追加する。
+FrontendとBackendへ`APP_ENV=production`と`DEMO_MODE=true`を渡し、Backendのメールを無効にし、BFFとは別のCRON_SECRETを使う。
+Backend CIは`APP_ENV=production`を検証したうえで、取得したDEMO_MODEに応じてデモの日次Cron設定を追加する。
+デモと通常のごみ箱回収は併用しない。デモ無効の場合だけ、明示した通常回収設定からごみ箱Cronを生成する。
+
+2026-10-08に、提案と実装の不一致を修正し、実行環境とデモ機能を分離する方針へ戻した。
+決定・変更・検証記録の正はBackendの`docs/decisions/2026-10-08-demo-mode.md`とする。
+旧`app_env = "demo"`は検証エラーとなるため、`production`へ戻して`demo_mode`を明示する。
+migration・seedなどの運用コマンドは`DEMO_MODE=false`を明示し、デモ用runtime設定を引き継がない。
 通常環境のCronは既定で登録しない。ローカル検証はmock planを使用し、cloud applyは別のリリース作業とする。
 
 ## 通常データの30日保持後の定期回収

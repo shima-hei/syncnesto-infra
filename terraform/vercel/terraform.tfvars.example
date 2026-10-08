@@ -1,5 +1,6 @@
 project_name   = "syncnesto"
 app_env = "production"
+demo_mode = false
 # デモ専用DB・privateバケットへの接続をruntimeで設定後にtrueにする。
 demo_data_isolated = false
 # 通常データは既定で定期回収しない。dry_runで対象を確認してからexecuteへ変更する。

@@ -94,6 +94,7 @@ class EnvironmentTests(unittest.TestCase):
                     "PGSSLROOTCERT": "ca",
                     "EMAIL_PROVIDER": "smtp",
                     "FRONTEND_PUBLIC_URL": "http://localhost:3000",
+                    "DEMO_MODE": "true",
                 },
             ),
             patch.object(
@@ -111,6 +112,7 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(result["EMAIL_PROVIDER"], "disabled")
         self.assertEqual(result["FRONTEND_PUBLIC_URL"], "https://syncnesto.vercel.app")
         self.assertEqual(result["APP_ENV"], "production")
+        self.assertEqual(result["DEMO_MODE"], "false")
 
 
 class TerraformTests(unittest.TestCase):
