@@ -220,6 +220,11 @@ mainを指定した手動実行で `operation=apply` を選ぶと本番へ適用
 本番Environmentはmain限定。DBのadvisory lockとGitHub concurrencyで同時更新を防ぎます。
 生ログ・state・planをActions artifactへ公開しません。
 
+Frontend/Backendの本番公開は、それぞれのActionsでCIを通過した後に行います。
+Vercel側にGit接続が残っていると、main更新でCI・migrationより先に公開されるため、
+各Projectの接続先を確認してGit自動デプロイを解除してください。
+`connect_github=false`の設定だけで、既存のGit接続が解除されたとは判断しないでください。
+
 infraの `production` Environmentに必要なSecrets:
 
 - `TF_STATE_DATABASE_URL`
@@ -300,6 +305,8 @@ uv run python -m scripts.deploy verify-web --skip-upload
 回数制限の検証は同じ1分内に再実行しないでください。
 
 アプリDBは `syncnesto_app` のCRUD・sequence利用だけを許可し、DDL・ロール/DB作成・管理権限を禁止します。
+本番migration・seed・Owner初期化ではメール送信を無効にし、Terraformの公開Frontend URLを使います。
+Backendの開発用`.env`にSMTPやlocalhostの設定があっても、運用処理には引き継ぎません。
 APIは共有BFFキーを必須にし、公開ドキュメントを閉じ、本番Cookie・Host・TLS設定を起動時に検証します。
 ログイン10回/分・通常240回/分・全体6000回/分の制限をDBで共有します。
 Neon Freeでは接続試行自体のIP遮断はできません。TLS・認証・権限分離で保護し、攻撃を完全に遮断する保証はありません。
