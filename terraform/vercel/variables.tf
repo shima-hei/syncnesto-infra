@@ -99,7 +99,7 @@ variable "demo_mode" {
 }
 
 variable "demo_data_isolated" {
-  description = "Confirm runtime DATABASE_URL and private storage bucket are dedicated to the demo."
+  description = "Confirm DEMO_DATABASE_URL and DEMO_AWS_* use dedicated demo resources while normal connections remain unchanged."
   type        = bool
   default     = false
 }
