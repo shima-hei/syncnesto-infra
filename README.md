@@ -745,6 +745,38 @@ Supabaseは[復旧コードを発行せず、予備TOTPを推奨する](https://
   Vercel teamも本人OWNER 1件・mfaEnabled=trueを確認した。
   Neon通常Projectの本人org/project adminは運用者権限であり、アプリのruntime権限とは分離している。
 
+### 2026-10-11のNeon権限確認
+
+通常・デモの両DBをTLS証明書検証付き接続と読み取り専用transactionで確認した。
+権限の実測はPostgreSQLカタログとruntime roleでの接続確認による。今回、CRUDの書き込み試験、
+SQLによる権限変更、Terraform apply、資格情報の変更は行っていない。
+
+| 層 | 担当する権限と実測 |
+| --- | --- |
+| `syncnesto_app` | Backend実行用。両DBとも管理属性・他roleの継承なし。全74テーブルでSELECT/INSERT/UPDATE/DELETE、43 sequenceでUSAGE/SELECT。表の所有、DB/schema CREATE、TRUNCATE、TRIGGER、権限の再付与は不可 |
+| `syncnesto_owner` | migration・DB運用用。両DBの全74テーブルを所有し、DB/role作成等の管理権限を持つ。Backendの通常接続には使わない |
+| `syncnesto_tfstate` | 通常ProjectのTerraform state専用。管理属性・他roleの継承なし。`syncnesto_app`からstate DBへのCONNECTは不可。デモProjectにはstate DBを置かない |
+| SyncnestoのRole/Permission | system・組織・Projectごとの業務認可。共有のDB runtime roleとは別で、Backendが本人の有効な所属とPermissionを判定する |
+
+通常・デモは別Neon Project・別接続・別資格情報を維持し、通常ログインをデモDBへ切り替えない。
+両DBともAlembic revisionは`a4f92c1e806d`で、MFAの4テーブル
+（`mfa_factors`、`mfa_flows`、`mfa_recovery_codes`、`mfa_recovery_requests`）に必要なruntime CRUD権限がある。
+`syncnesto_owner`がpublic schemaに今後作成する表にもCRUD、sequenceにもUSAGE/SELECTを付与する
+default privilegeが設定され、[通常](terraform/neon/main.tf)と[デモ](terraform/demo-neon/main.tf)のTerraform定義と一致した。
+
+両DBの全74テーブルでRLSは無効、RLS policyは0件だった。`NOBYPASSRLS`だけで行単位の
+組織隔離が成立するわけではなく、現行の組織・Project境界はBackendの認可と検索条件が担う。
+システム管理者・組織管理者等にNeonのDB管理roleを割り当てる設計ではない。
+アプリのPermissionを整理するときも、DBのGRANT変更と混同せず、
+[運営・組織・業務権限の決定記録](../syncnesto-backend/docs/decisions/2026-10-10-mfa-authorization.md)に合わせる。
+RLSを追加する場合は、認証・組織コンテキストのDB伝達、poolerでのtransaction境界、運営操作・migration・
+デモ回収への影響を設計してから行う。今回、RLSを追加していない。
+
+追加の最小化候補として、両Projectのmaintenance DB `postgres`にはPUBLIC由来のCONNECT/TEMPが残る。
+業務DBのCREATE/TEMPやstate DBへの接続を許すものではない。利用箇所とNeon/Providerの管理処理への
+影響を確認してから縮小し、今回のMFA適用と同時には変更しない。
+Neon管理APIキーのscope・有効期限は、このDB権限監査とは別の残確認とする。
+
 管理トークンの確認結果（値は記録しない）:
 
 | 対象 | 用途・期限・範囲 | 残確認 |
