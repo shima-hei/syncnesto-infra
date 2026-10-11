@@ -818,6 +818,39 @@ Codex接続用は必要な管理操作を列挙して権限を絞る。Syncnesto
 APIキーを読める権限は強い権限であり、短期・Project限定・運用時のみの扱いを維持する。
 今回、管理トークン・DBパスワード・JWT/BFF鍵の一括rotationは実行していない。
 
+### 2026-10-12の運営Role分離
+
+Backend PR #23でsystem scopeの `system_admin` を運営用の6 Permissionへ限定する。
+`tenant:manage`、`user:read`、`user:create`、`user:update`、`user:mfa_recover`、`user:delete`が対象。
+既存DBはAlembic `b7d30e2c941a`、新規構築/再実行は更新したseedで揃える。
+Project Role・組織所属・本人へのRole割当は保持し、DB roleのGRANT・所有者・RLSを変更しない。
+権限はBackendがDBから毎回判定するため、運営Roleに付いていた業務Permissionが認可の例外として残らない。
+
+適用前に通常・デモ両Neon DBを読み取りでcustom-format dumpへ保存した。
+`/Users/kohei/.local/share/syncnesto/backups/public-pre-rbac-20261012/`（directory700、files600）に
+dump・baseline・復元確認の記録を置き、秘密や業務データをGitへ含めない。
+ネットワークと公開ポートのない隔離PostgreSQLへ各DBを復元してmigrationを実行し、
+各74テーブル中 `role_permissions` と `alembic_version` だけが変化、他72テーブルの内容hash一致を確認した。
+確認用コンテナは削除済み。
+
+Backend PR #23をマージし、main CI `38153960647` のmigration・デプロイが成功した。
+Vercel Productionはcommit `752d6169b764e002f30fdeb0768018cbb9e2d5be`、
+deployment `dpl_CBiMXFbiTQFXcYxf7bnYSHPt9AJz` がREADY。公開healthは200、BFFを通らない `/auth/me` は403を維持した。
+適用後に通常・デモ両DBをTLS証明書検証付きの読み取り専用transactionで照合した。
+
+| 確認 | 通常 / デモの結果 |
+| --- | --- |
+| Alembic revision | 両方 `b7d30e2c941a` |
+| system / `system_admin` | 両方6件。上記の運営Permissionと完全一致 |
+| Project Role | project_admin 33 / manager 24 / member 20 / viewer 6。移行前と同一 |
+| その他の付与・所属 | 他Roleの付与、User Role、組織所属、Project所属は移行前と同一 |
+| DB接続権限 | runtime role属性、全74テーブルの所有者/RLS状態/CRUD GRANTは移行前と同一 |
+
+照合結果は同バックアップディレクトリの `production-verification.json` に保存した。
+デモのroles-only初期化を維持し、運営Identityを作成していない。Terraform定義・クラウド資源・秘密情報は変更していない。
+Frontend PR #27もmain CI `38155609737`で公開済み（commit `4e6a4cc22b6d9d38c3af19b7f7643f7013882611`）。
+匿名デモで運営Role「なし」・組織Role「所有者」を別表示し、Projectメンバーの役割欄も確認した。
+
 ### バックアップと実際の復元
 
 - 通常Neon（PostgreSQL 17.11）の66テーブル・233行、Terraform state DBの5テーブル・5行を
