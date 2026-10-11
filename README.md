@@ -772,6 +772,31 @@ default privilegeが設定され、[通常](terraform/neon/main.tf)と[デモ](t
 RLSを追加する場合は、認証・組織コンテキストのDB伝達、poolerでのtransaction境界、運営操作・migration・
 デモ回収への影響を設計してから行う。今回、RLSを追加していない。
 
+アプリRBACの永続データも、両DBを読み取り専用で集計した。Permissionは各40件、Role別の付与数は共通である。
+
+| Scope / Role key | Permission付与数 |
+| --- | --- |
+| system / `system_admin` | 39件（運営6件・業務33件）。`mcp:connect`は未付与 |
+| project / `project_admin` | 33件 |
+| project / `manager` | 24件 |
+| project / `member` | 20件 |
+| project / `viewer` | 6件。`mcp:connect`は未付与 |
+| tenant / `tenant_owner`・`tenant_admin`・`tenant_member` | 各0件。組織管理は現在Role keyで判定 |
+
+`user:mfa_recover`の付与先は両DBともsystem / `system_admin`だけだった。
+通常DBでは有効なシステム管理者1人が組織OwnerとProject管理者を兼任し、別に有効な組織Admin所属が1件ある。
+デモDBにはシステム管理者のIdentity・組織所属は0件で、Role/Permission定義だけを共通に持つ。
+`system_admin`に業務Permissionが保存されていても、BackendのProject認可は有効な組織所属と
+`scope=project`のProject所属Permissionを要求するため、それだけで業務権限を自動取得しない。
+
+整理時は[seed](../syncnesto-backend/scripts/seed_rbac.py)と新しいAlembic migrationの両方を更新する。
+現在のseedは`system_admin`へ全40件を追加するため、再実行すると現在未付与の`mcp:connect`も加わる。
+またseedは追加方式なので、一覧から除く変更だけでは既存の余分な付与を削除できない。
+運営用Permissionの明示的な定義と、対象をsystem / `system_admin`に限定した既存付与の移行を用意し、
+Project Role・組織所属・本人のRole割当を保持する。通常・デモの両Neon DBへ同じmigrationを適用し、
+新規構築のseedと既存DBの付与が一致すること、運営API・Project認可・MCPの権限再検証を確認する。
+デモには運営Identityを作らず、roles-onlyの初期化を維持する。今回、RBACの行は変更していない。
+
 追加の最小化候補として、両Projectのmaintenance DB `postgres`にはPUBLIC由来のCONNECT/TEMPが残る。
 業務DBのCREATE/TEMPやstate DBへの接続を許すものではない。利用箇所とNeon/Providerの管理処理への
 影響を確認してから縮小し、今回のMFA適用と同時には変更しない。
