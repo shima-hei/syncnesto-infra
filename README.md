@@ -3,6 +3,41 @@
 Syncnestoのローカル開発環境と、無料プランの公開環境を管理します。
 公開URL: [Syncnesto](https://syncnesto.vercel.app/login)。
 
+### デモStorageの復旧と定期確認（2026-10-15）
+
+デモのアプリDBはNeon、ファイル保存は専用Supabase Projectです。
+今回停止していたSupabase `syncnesto-demo` は無料プランのまま復旧しました。
+Neonの`idle`は通常のscale-to-zeroで、アクセス時に自動復帰します。
+無料枠のComputeを消費し続けないよう、Neonの自動休止は維持します。
+
+[Demo storage health](.github/workflows/demo-storage-health.yml) をmain上のGitHub Actionsで
+8時間ごと（UTC 00:23 / 08:23 / 16:23、日本時間 01:23 / 09:23 / 17:23）に実行します。
+既存の非公開`syncnesto-demo/default-avatar.png`にHEADと先頭8 bytesのGETを行い、
+S3署名・メタデータ・PNGの取得を確認します。利用者データの一覧取得や書込み・削除は行いません。
+PCの常時起動、通常Storageのキー、DB接続、管理トークンは不要です。
+既存のproduction Environmentにあるデモ専用S3 Secretsと、
+Repository Variable `DEMO_SUPABASE_PROJECT_REF`だけを使用します。
+対象Project refはスクリプトでも固定し、通常環境や別Projectへの誤接続を拒否します。
+
+この公開Repositoryの標準runnerを使用し、キャッシュ・成果物の保存や有料サービスの追加はありません。
+[Supabaseの無料Project](https://supabase.com/docs/guides/platform/free-project-pausing)は
+低利用の状態が続くと一時停止の対象です。定期API利用で未使用判定を避ける対策ですが、
+無料プランでの無停止やGitHubの定刻実行を保証するものではありません。
+GitHubは公開Repositoryに60日間活動がない場合、scheduleを無効化することがあります。
+Actions画面でworkflowの有効状態と成功履歴を確認し、無効なら再有効化してください。
+
+手動確認はGitHub Actionsの「Demo storage health」→「Run workflow」（main）から実行できます。
+ローカルでは権限600のGit対象外`.env.demo.local`を使い、次を実行します。
+
+```bash
+uv run --frozen --no-dev python -m scripts.demo_storage_health
+```
+
+失敗時はjobが失敗扱いになります。通知を受ける場合はGitHubのActions通知設定を確認してください。
+Supabaseの停止ならDashboardから無料Projectを復旧し、その後に手動確認を実行します。
+稼働中ならデモS3キーと既存アバターを確認します。自動の管理API復旧や課金プラン変更は行いません。
+LocalStack、Terraform資源・state、Backend環境変数、通常/デモの振り分けには変更ありません。
+
 2026-10-08の最新運用状態: 通常・デモの共存を公開済み。通常ごみ箱はTenant 1だけを対象に
 30日経過後の回収を`execute`で有効化した。管理4サービスのMFA/Passkeyと、DB・state・ファイルの
 ローカル復元を確認済み。詳細と残課題は末尾の「2026-10-08の運用確認」を参照する。
