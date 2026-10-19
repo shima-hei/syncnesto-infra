@@ -4,12 +4,19 @@ import argparse
 import json
 import os
 import secrets
+import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
 import boto3
 from botocore.config import Config
-from botocore.exceptions import ClientError
+from botocore.exceptions import (
+    ClientError,
+    ConnectionClosedError,
+    ConnectTimeoutError,
+    EndpointConnectionError,
+    ReadTimeoutError,
+)
 from dotenv import dotenv_values
 
 PREFIX = "SHARED_FILE_DELIVERY_"
@@ -110,15 +117,28 @@ def initialize(path: Path) -> None:
         ),
     )
     bucket = values[PREFIX + "BUCKET_NAME"]
-    try:
-        client.head_bucket(Bucket=bucket)
-    except ClientError as error:
-        if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 404:
-            raise
-        client.create_bucket(
-            Bucket=bucket,
-            CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"},
-        )
+    deadline = time.monotonic() + 15
+    while True:
+        try:
+            client.head_bucket(Bucket=bucket)
+            break
+        except ClientError as error:
+            if error.response.get("ResponseMetadata", {}).get("HTTPStatusCode") != 404:
+                raise
+            client.create_bucket(
+                Bucket=bucket,
+                CreateBucketConfiguration={"LocationConstraint": "ap-northeast-1"},
+            )
+            break
+        except (
+            ConnectionClosedError,
+            ConnectTimeoutError,
+            EndpointConnectionError,
+            ReadTimeoutError,
+        ):
+            if time.monotonic() >= deadline:
+                raise
+            time.sleep(0.25)
     version = client.get_bucket_versioning(Bucket=bucket).get("Status")
     if version is None:
         client.put_bucket_versioning(

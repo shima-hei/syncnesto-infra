@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-from botocore.exceptions import ClientError
+from botocore.exceptions import ClientError, EndpointConnectionError
 
 from scripts import shared_file_delivery as delivery
 
@@ -67,6 +67,25 @@ class SharedDeliveryTests(unittest.TestCase):
                 delivery.initialize(path)
             client.put_bucket_cors.assert_not_called()
             client.put_bucket_versioning.assert_not_called()
+
+    def test_startup_transport_failure_retries_without_replacing_bucket(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            path = self.config(Path(temporary))
+            client = MagicMock()
+            client.head_bucket.side_effect = [
+                EndpointConnectionError(endpoint_url="http://127.0.0.1:18334"),
+                None,
+            ]
+            client.get_bucket_versioning.return_value = {"Status": "Enabled"}
+            client.get_bucket_cors.return_value = {"CORSRules": []}
+            with (
+                patch.object(delivery.boto3, "client", return_value=client),
+                patch.object(delivery.time, "sleep") as sleep,
+            ):
+                delivery.initialize(path)
+            self.assertEqual(client.head_bucket.call_count, 2)
+            sleep.assert_called_once_with(0.25)
+            client.create_bucket.assert_not_called()
 
     def test_new_bucket_initializes_only_dedicated_credentials_and_get_cors(self):
         with tempfile.TemporaryDirectory() as temporary:
