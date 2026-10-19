@@ -4,6 +4,18 @@ DEPLOY = $(PYTHON) -m scripts.deploy
 TF = terraform -chdir=terraform/localstack
 
 .PHONY: help check
+.PHONY: shared-files-up shared-files-init shared-files-stop
+SHARED_FILES_ENV_FILE ?= $(HOME)/.local/share/syncnesto/storage/shared-files.env
+SHARED_FILES_COMPOSE = docker compose --project-name syncnesto-shared-files --env-file "$(SHARED_FILES_ENV_FILE)" -f docker-compose.shared-files.yml
+
+shared-files-up:
+	$(SHARED_FILES_COMPOSE) up -d
+
+shared-files-init:
+	$(PYTHON) -m scripts.shared_file_delivery --env-file "$(SHARED_FILES_ENV_FILE)" init
+
+shared-files-stop:
+	$(SHARED_FILES_COMPOSE) stop shared-files
 .PHONY: localstack-up localstack-down terraform-init terraform-validate terraform-plan terraform-apply terraform-destroy s3-ls sqs-list
 .PHONY: mailpit-up mailpit-stop
 .PHONY: vercel-init vercel-validate vercel-test vercel-plan vercel-apply db-migrate
