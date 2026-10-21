@@ -113,6 +113,10 @@ make check
 ```
 
 `make check` はformat・lint・Pythonテストと全Terraform構成のvalidate・公開環境のmockテストを実行します。
+
+結果は短いJSONで表示し、各工程の完全ログと終了コード/時間を `.verify/<run>/` に保存します。
+失敗時は該当ログ末尾と保存先を返します。timeout・中断・起動失敗は成功扱いしません。
+テストやTerraform検証は省略せず、実環境へのplan/applyや認証情報を使う操作は追加しません。
 クラウドの認証情報・本番stateは使いません。Provider lockはmacOS ARM64・Linux AMD64に対応しています。
 通常のPython運用コマンドはinfra単独で実行できます。
 アプリのmigration・seedだけは隣の `../syncnesto-backend` を使います。

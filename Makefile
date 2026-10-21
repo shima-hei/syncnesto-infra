@@ -72,8 +72,4 @@ storage-verify:
 
 # クラウド資格情報を使わない検証
 check:
-	uv run ruff check scripts tests
-	uv run ruff format --check scripts tests
-	uv run python -m unittest discover -s tests -v
-	terraform -chdir=terraform fmt -check -recursive
-	$(DEPLOY) validate
+	uv run python -m scripts.verify
