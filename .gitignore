@@ -14,6 +14,7 @@ state-backups/
 .venv/
 __pycache__/
 *.pyc
+.verify/
 .ruff_cache/
 
 # Terraformの秘密・生成物（provider lockはGit管理）

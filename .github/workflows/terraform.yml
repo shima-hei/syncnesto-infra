@@ -20,6 +20,9 @@ jobs:
   checks:
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    concurrency:
+      group: infra-checks-${{ github.event_name == 'pull_request' && github.ref || github.run_id }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -35,6 +38,17 @@ jobs:
       - name: Validate and test without cloud credentials
         run: make check
       - run: python3 -m compileall -q scripts
+      - name: Preserve complete validation diagnostics
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: infra-checks
+          include-hidden-files: true
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            .verify/**/result.json
+            .verify/**/*.log
 
   production:
     needs: checks
