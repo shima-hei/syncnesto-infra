@@ -14,6 +14,10 @@ shared-files-up:
 shared-files-init:
 	$(PYTHON) -m scripts.shared_file_delivery --env-file "$(SHARED_FILES_ENV_FILE)" init
 
+.PHONY: verification-evidence-init
+verification-evidence-init:
+	$(PYTHON) -m scripts.verification_evidence_storage --env-file "$(SHARED_FILES_ENV_FILE)"
+
 shared-files-stop:
 	$(SHARED_FILES_COMPOSE) stop shared-files
 .PHONY: localstack-up localstack-down terraform-init terraform-validate terraform-plan terraform-apply terraform-destroy s3-ls sqs-list

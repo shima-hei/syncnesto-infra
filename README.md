@@ -970,3 +970,20 @@ Frontend開発依存の`braces`について、2026-10-08の[公式advisory](http
 `npm explain braces`ではshadcn側だけでなくeslint-config-next側からも入るため、shadcn削除だけでは解消しない。
 依存の置換・保守forkによる対応も可能だが、今回は監査を継続し、開発ツールへ未検証のglobを渡さず、
 公式修正版を待つ。監査除外・古いmajorへの自動downgrade・AI/Eveの再開は行わない。
+
+## 検証証拠のLOCAL保全（V1b）
+
+`make verification-evidence-init` は既存SeaweedFSのserver資格情報を読み、
+`syncnesto-local-verification-evidence` bucketだけを作成してversioningを有効にする。
+既存配信bucket/Compose/Terraform/credential/CORSには書き込まない。
+既存bucketのACL/policy/CORS/versioningが異なる場合は停止し、修復しない。
+
+Backendの新設定は `REQUIREMENT_VERIFICATION_EVIDENCE_ENABLED`（既定false）と
+`VERIFICATION_EVIDENCE_BUCKET_NAME`。既存のSHARED_FILE_DELIVERY endpoint/資格情報を利用する。
+LOCAL専用で、公開環境・デモ・ゲスト・MCPには接続しない。
+
+保全済みのVersionIdを維持する復旧には、**DBとSeaweedFS永続領域の整合した保全**が必要。
+稼働中のディレクトリコピーをバックアップ成功と扱わない。サービス停止後に永続領域を
+別領域へ複製してから再起動し、復元側でDB manifestのVersionId/bytes/SHA256を照合する。
+S3経由の全版エクスポートも保管するが、再PUTだけで同一VersionIdが復元できるとはみなさない。
+初期はready実体・履歴を自動削除しない。停止はflag OFFで行い、bucketや履歴を削除しない。
