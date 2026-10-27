@@ -1,5 +1,36 @@
 # syncnesto-infra
 
+### LOCALの共有添付配信（Phase 2A-3c）
+
+共有DLのためのSeaweedFS 4.48を、既存LocalStack/SQSと独立したComposeで起動します。
+元の保全添付が正本で、別の非公開バケット・不透明キーに検証済みの派生コピーを置きます。
+通常S3の切替や全量移行、旧Storageの無署名取得/消失問題の解消は含みません。
+Python/npmの依存追加や有料サービスはありません。imageはdigest固定、公開はloopback8333だけです。
+
+所有者専用の設定・永続データ領域を作成します（既存設定は上書きしません）。
+
+```bash
+uv run python -m scripts.shared_file_delivery --env-file /Users/kohei/.local/share/syncnesto/storage/shared-files.env create-config --data-dir /Users/kohei/.local/share/syncnesto/storage/shared-files
+make shared-files-up
+make shared-files-init
+```
+
+`SHARED_FILES_ENV_FILE=/absolute/private/file`で専用設定を切り替えられます。
+既存`make localstack-up`やTerraformのendpoint/stateは変えません。
+設定の内容を`docker compose config`等で表示しないでください。構文検査には`config --quiet`を使います。
+
+Backendは`SHARED_PUBLICATION_DOWNLOAD_ENABLED`（既定false）と
+`SHARED_FILE_DELIVERY_ENDPOINT_URL/BUCKET_NAME/ACCESS_KEY_ID/SECRET_ACCESS_KEY`だけを追加設定します。
+元のAWS_*・DEMO_AWS_*を上書きせず、配信credentialsをブラウザへ渡しません。
+Frontendには同名の有効flagだけをserver側で設定します。C0〜C3の検証後に明示的に有効化します。
+公開環境でこのLOCAL専用clientを使うことは拒否します。
+
+停止は`make shared-files-stop`。先に新DL flagを止め、発行済みリンクの最大60秒を経過させます。
+データdirectoryを削除するコマンドは用意しません。復旧用backupは専用サービス停止中に
+データdirectory全体をowner-onlyの別領域へコピーし、別directoryで復元してbytes/版を確認します。
+元S3/DBのbackupと配信用コピーのbackupは区別してください。初期の自動削除はなく容量は増えます。
+通常DBのmigration・権限追加はありません。
+
 Syncnestoのローカル開発環境と、無料プランの公開環境を管理します。
 公開URL: [Syncnesto](https://syncnesto.vercel.app/login)。
 
@@ -82,6 +113,12 @@ make check
 ```
 
 `make check` はformat・lint・Pythonテストと全Terraform構成のvalidate・公開環境のmockテストを実行します。
+
+結果は短いJSONで表示し、各工程の完全ログと終了コード/時間を `.verify/<run>/` に保存します。
+失敗時は該当ログ末尾と保存先を返します。timeout・中断・起動失敗は成功扱いしません。
+テストやTerraform検証は省略せず、実環境へのplan/applyや認証情報を使う操作は追加しません。
+PRのchecksだけ古い実行を中断し、CIでは成功/失敗ともJSONと完全ログを7日artifact保存します。
+mainの検証の並行性と、productionの`cancel-in-progress: false`は保持します。
 クラウドの認証情報・本番stateは使いません。Provider lockはmacOS ARM64・Linux AMD64に対応しています。
 通常のPython運用コマンドはinfra単独で実行できます。
 アプリのmigration・seedだけは隣の `../syncnesto-backend` を使います。
@@ -933,3 +970,20 @@ Frontend開発依存の`braces`について、2026-10-08の[公式advisory](http
 `npm explain braces`ではshadcn側だけでなくeslint-config-next側からも入るため、shadcn削除だけでは解消しない。
 依存の置換・保守forkによる対応も可能だが、今回は監査を継続し、開発ツールへ未検証のglobを渡さず、
 公式修正版を待つ。監査除外・古いmajorへの自動downgrade・AI/Eveの再開は行わない。
+
+## 検証証拠のLOCAL保全（V1b）
+
+`make verification-evidence-init` は既存SeaweedFSのserver資格情報を読み、
+`syncnesto-local-verification-evidence` bucketだけを作成してversioningを有効にする。
+既存配信bucket/Compose/Terraform/credential/CORSには書き込まない。
+既存bucketのACL/policy/CORS/versioningが異なる場合は停止し、修復しない。
+
+Backendの新設定は `REQUIREMENT_VERIFICATION_EVIDENCE_ENABLED`（既定false）と
+`VERIFICATION_EVIDENCE_BUCKET_NAME`。既存のSHARED_FILE_DELIVERY endpoint/資格情報を利用する。
+LOCAL専用で、公開環境・デモ・ゲスト・MCPには接続しない。
+
+保全済みのVersionIdを維持する復旧には、**DBとSeaweedFS永続領域の整合した保全**が必要。
+稼働中のディレクトリコピーをバックアップ成功と扱わない。サービス停止後に永続領域を
+別領域へ複製してから再起動し、復元側でDB manifestのVersionId/bytes/SHA256を照合する。
+S3経由の全版エクスポートも保管するが、再PUTだけで同一VersionIdが復元できるとはみなさない。
+初期はready実体・履歴を自動削除しない。停止はflag OFFで行い、bucketや履歴を削除しない。
